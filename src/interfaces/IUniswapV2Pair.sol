@@ -12,7 +12,7 @@ interface IUniswapV2Pair {
     function decimals() external pure returns (uint8);
 
     // ERC-20 STATE
-    function totalSupply()  external view returns (uint256);
+    function totalSupply() external view returns (uint256);
     function balanceOf(address owner) external view returns (uint256);
     function allowance(address owner, address spender) external view returns (uint256);
 
@@ -25,20 +25,20 @@ interface IUniswapV2Pair {
     function DOMAIN_SEPERATOR() external view returns (bytes32);
     function PERMIT_TYPE() external pure returns (bytes32);
     function nonces(address owner) external view returns (uint256);
-    function permit(
-        address owner,
-        address spender,
-        uint256 value,
-        uint256 deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external;
+    function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+        external;
 
     // PAIR EVENTS
     event Mint(address indexed sender, uint256 amount0, uint256 amount1);
     event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
-    event Swap(address indexed sender, uint256 amount0, uint256 amount1, uint256 amount0Out, uint256 amount1Out, address indexed to);
+    event Swap(
+        address indexed sender,
+        uint256 amount0,
+        uint256 amount1,
+        uint256 amount0Out,
+        uint256 amount1Out,
+        address indexed to
+    );
     event Sync(uint256 reserve0, uint256 reserve1);
 
     // PAIR CONSTANTS AND STATE
@@ -60,5 +60,4 @@ interface IUniswapV2Pair {
 
     // FACTORY INITIALZATION
     function initialize(address token0_, address token1_) external;
-
 }
