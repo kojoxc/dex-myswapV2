@@ -63,4 +63,16 @@ contract WETH9Test is Test {
         assertEq(weth.balanceOf(bob), 0.5 ether);
         assertEq(weth.allowance(alice, bob), 1 ether);
     }
+
+    function testWithdrawRevertsWhensBalanceInsufficient() public {
+        vm.expectRevert();
+        weth.withdraw(1 ether);
+    }
+
+    function testTransferFromUsersRevertWhensBalanceInsufficient() public {
+        vm.startPrank(bob);
+        vm.expectRevert();
+        weth.transfer(alice, 1 ether);
+        vm.stopPrank();
+    }
 }
