@@ -16,16 +16,12 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
 
     bytes32 public immutable DOMAIN_SEPARATOR;
     bytes32 public constant PERMIT_TYPEHASH =
-        keccak256(
-            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
-        );
-    
+        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+
     constructor() {
         DOMAIN_SEPARATOR = keccak256(
             abi.encode(
-                keccak256(
-                    "EIP71coba2Domain(string name,string version,uint256 chainId,address verifyingContract)"
-                ),
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
                 keccak256(bytes(name)),
                 keccak256(bytes("1")),
                 block.chainid,
@@ -92,15 +88,9 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
         return true;
     }
 
-    function permit(
-        address owner,
-        address spender,
-        uint256 value,
-        uint256 deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external {
+    function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+        external
+    {
         require(block.timestamp <= deadline, "UniswapV2: EXPIRED");
 
         uint256 nonce = nonces[owner];
@@ -109,30 +99,16 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
             abi.encodePacked(
                 "\x19\x01",
                 DOMAIN_SEPARATOR,
-                keccak256(
-                    abi.encode(
-                        PERMIT_TYPEHASH,
-                        owner,
-                        spender,
-                        value,
-                        nonce,
-                        deadline
-                    )
-                )
+                keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonce, deadline))
             )
         );
 
         address recoveredAddress = ecrecover(digest, v, r, s);
 
-        require(
-            recoveredAddress != address(0) &&
-            recoveredAddress == owner,
-            "UniswapV2: INVALID_SIGNATURE"
-        );
+        require(recoveredAddress != address(0) && recoveredAddress == owner, "UniswapV2: INVALID_SIGNATURE");
 
         nonces[owner] = nonce + 1;
 
         _approve(owner, spender, value);
     }
-
 }
