@@ -143,6 +143,21 @@ contract UniswapV2PairTest is Test {
         assertEq(uint256(reserve1), 10 ether - amountOut);
     }
 
+    function testFuzzSwapToken0ForToken1DoesNotDecreaseK(uint96 amountInSeed) public {
+        _addLiquidity(address(this), 100 ether, 100 ether);
+        (uint112 reserve0Before, uint112 reserve1Before,) = pair.getReserves();
+        uint256 amountIn = bound(uint256(amountInSeed), 1e9, 50 ether);
+        uint256 amountOut = _getAmountOut(amountIn, reserve0Before, reserve1Before);
+
+        token0.mint(address(this), amountIn);
+        assertTrue(token0.transfer(address(pair), amountIn));
+
+        pair.swap(0, amountOut, alice, "");
+
+        (uint112 reserve0After, uint112 reserve1After,) = pair.getReserves();
+        assertGe(uint256(reserve0After) * uint256(reserve1After), uint256(reserve0Before) * uint256(reserve1Before));
+    }
+
     function testSwapRevertsWithoutInputAmount() public {
         _addLiquidity(address(this), 5 ether, 10 ether);
 

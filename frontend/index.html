@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MySwap V2</title>
+        <link rel="stylesheet" href="./styles.css" />
+    </head>
+    <body>
+        <main class="shell">
+            <section class="hero">
+                <div>
+                    <p class="eyebrow">Foundry AMM Playground</p>
+                    <h1>MySwap V2</h1>
+                    <p class="muted">Minimal interface for local deployments: approve tokens, add liquidity, and swap.</p>
+                </div>
+                <button id="connectWallet">Connect Wallet</button>
+            </section>
+
+            <section class="card">
+                <h2>Deployment</h2>
+                <div class="grid two">
+                    <label>Router <input id="router" placeholder="0x..." /></label>
+                    <label>Factory <input id="factory" placeholder="0x..." /></label>
+                    <label>Token A <input id="tokenA" placeholder="0x..." /></label>
+                    <label>Token B <input id="tokenB" placeholder="0x..." /></label>
+                </div>
+                <div class="actions">
+                    <button id="saveConfig">Save Config</button>
+                    <button id="refreshBalances" class="secondary">Refresh Balances</button>
+                </div>
+            </section>
+
+            <section class="grid two">
+                <div class="card">
+                    <h2>Approve</h2>
+                    <label>Token <select id="approveToken"><option value="A">Token A</option><option value="B">Token B</option></select></label>
+                    <label>Amount <input id="approveAmount" value="100" /></label>
+                    <button id="approve">Approve Router</button>
+                </div>
+
+                <div class="card">
+                    <h2>Add Liquidity</h2>
+                    <label>Token A Amount <input id="liquidityA" value="10" /></label>
+                    <label>Token B Amount <input id="liquidityB" value="10" /></label>
+                    <button id="addLiquidity">Add Liquidity</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Swap Exact Tokens</h2>
+                <div class="grid three">
+                    <label>Direction <select id="swapDirection"><option value="A_B">A to B</option><option value="B_A">B to A</option></select></label>
+                    <label>Amount In <input id="swapAmountIn" value="1" /></label>
+                    <label>Min Out <input id="swapAmountOutMin" value="0" /></label>
+                </div>
+                <button id="swap">Swap</button>
+            </section>
+
+            <section class="card">
+                <h2>Status</h2>
+                <pre id="status">Not connected.</pre>
+            </section>
+        </main>
+
+        <script type="module" src="./app.js"></script>
+    </body>
+</html>

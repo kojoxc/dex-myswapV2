@@ -4,35 +4,38 @@ Foundry workspace for learning and building a Uniswap V2/SushiSwap-style AMM.
 
 ## Current Status
 
-This repository is currently a clean baseline, not a complete DEX yet.
+This repository now contains a working Uniswap V2-style learning DEX core and periphery.
 
-- `src/mocks/MockERC20.sol`: unrestricted ERC20 mock for tests.
+- `src/core/UniswapV2ERC20.sol`: LP token with EIP-2612-style permit.
+- `src/core/UniswapV2Factory.sol`: pair factory with fee setter controls.
+- `src/core/UniswapV2Pair.sol`: AMM pair with mint, burn, swap, skim, sync, flash-swap callback, and fee-on support.
+- `src/periphery/UniswapV2Library.sol`: reserve lookup and swap/liquidity math helpers.
+- `src/periphery/UniswapV2Router02.sol`: token-token and ETH/WETH liquidity/swap router.
+- `src/mocks/MockERC20.sol`: unrestricted ERC20 mock for tests/local deployments.
 - `src/mocks/WETH9.sol`: local WETH-compatible mock.
-- `src/core/`: reserved for Factory, Pair, and LP ERC20 contracts.
-- `src/periphery/`: reserved for Router and Library contracts.
-- `src/interfaces/`: reserved for public interfaces.
-- `test/`: Foundry tests, split by contract area.
+- `script/`: Foundry deployment and interaction scripts.
+- `frontend/`: static lightweight wallet UI for local/manual testing.
+- `test/`: unit, fuzz, invariant, and integration tests.
 
 ## Roadmap
 
-1. Port core contracts first:
-   - `UniswapV2ERC20`
-   - `UniswapV2Factory`
-   - `UniswapV2Pair`
-2. Add core tests:
-   - pair creation
-   - add liquidity through `Pair.mint`
-   - remove liquidity through `Pair.burn`
-   - token0/token1 swaps
-   - invariant checks around reserves and `k`
-3. Port periphery contracts:
-   - `UniswapV2Library`
-   - `UniswapV2Router02`
-4. Add router tests:
-   - add/remove liquidity
-   - token-to-token swaps
-   - ETH swaps through WETH
-   - slippage and deadline reverts
+1. Strengthen the existing contracts:
+   - more malicious-token tests
+   - deeper fee-on and TWAP scenarios
+   - gas snapshots
+2. Add frontend polish:
+   - pair discovery
+   - quote preview
+   - ETH swap forms
+   - LP balance/removal UI
+3. Add deployment hardening:
+   - network config files
+   - broadcast verification notes
+   - explorer verification scripts
+4. Add audit-oriented checks:
+   - static analysis
+   - invariant suites for router flows
+   - fork tests against known token behaviors
 
 ## Commands
 
@@ -40,7 +43,28 @@ This repository is currently a clean baseline, not a complete DEX yet.
 forge fmt
 forge build
 forge test -vvv
+forge coverage
 ```
+
+## Deployment Scripts
+
+```shell
+forge script script/DeployLocal.s.sol --broadcast --rpc-url <RPC_URL>
+forge script script/DeployCore.s.sol --broadcast --rpc-url <RPC_URL>
+ROUTER=<router> TOKEN_A=<tokenA> TOKEN_B=<tokenB> forge script script/AddLiquidity.s.sol --broadcast --rpc-url <RPC_URL>
+ROUTER=<router> TOKEN_IN=<tokenA> TOKEN_OUT=<tokenB> forge script script/SwapExactTokensForTokens.s.sol --broadcast --rpc-url <RPC_URL>
+```
+
+## Frontend
+
+The frontend is static and has no build step.
+
+```shell
+cd frontend
+python3 -m http.server 5173
+```
+
+Then open `http://localhost:5173` and enter the deployed Router, Factory, and token addresses.
 
 ## Notes
 
