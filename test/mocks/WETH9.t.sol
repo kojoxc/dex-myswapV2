@@ -70,9 +70,9 @@ contract WETH9Test is Test {
     }
 
     function testTransferFromUsersRevertWhensBalanceInsufficient() public {
-        vm.startPrank(bob);
-        vm.expectRevert();
-        weth.transfer(alice, 1 ether);
-        vm.stopPrank();
+        vm.prank(bob);
+        (bool success,) = address(weth).call(abi.encodeCall(weth.transfer, (alice, 1 ether)));
+
+        assertFalse(success);
     }
 }
