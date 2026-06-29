@@ -130,6 +130,20 @@ export const routerAbi = [
 export const factoryAbi = [
     {
         type: "function",
+        name: "allPairsLength",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [{ type: "uint256" }],
+    },
+    {
+        type: "function",
+        name: "allPairs",
+        stateMutability: "view",
+        inputs: [{ name: "index", type: "uint256" }],
+        outputs: [{ name: "pair", type: "address" }],
+    },
+    {
+        type: "function",
         name: "getPair",
         stateMutability: "view",
         inputs: [
@@ -144,6 +158,13 @@ export const pairAbi = [
     {
         type: "function",
         name: "token0",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [{ type: "address" }],
+    },
+    {
+        type: "function",
+        name: "token1",
         stateMutability: "view",
         inputs: [],
         outputs: [{ type: "address" }],

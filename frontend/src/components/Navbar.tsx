@@ -33,6 +33,16 @@ export function Navbar() {
                     >
                         Liquidity
                     </NavLink>
+                    <NavLink
+                        to="/pools"
+                        className={({ isActive }) =>
+                            `rounded-full px-3 py-2 text-sm font-black transition sm:px-4 ${
+                                isActive ? "bg-white text-slate-950" : "text-slate-300 hover:text-white"
+                            }`
+                        }
+                    >
+                        Pools
+                    </NavLink>
                 </nav>
             </div>
 

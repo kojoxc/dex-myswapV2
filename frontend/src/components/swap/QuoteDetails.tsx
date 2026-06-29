@@ -6,6 +6,7 @@ type QuoteDetailsProps = {
     isLoading: boolean;
     error?: string;
     rate?: string;
+    priceImpact?: string;
     amountOutMin?: bigint;
     tokenIn?: TokenInfo;
     tokenOut?: TokenInfo;
@@ -45,7 +46,7 @@ export function QuoteDetails(props: QuoteDetailsProps) {
     return (
         <dl className="grid gap-2 rounded-[1.25rem] border border-white/[0.08] bg-black/20 p-4 text-sm">
             <DetailRow label="Rate" value={`1 ${props.tokenIn.symbol} = ${props.rate} ${props.tokenOut.symbol}`} />
-            <DetailRow label="Price impact" value="Not estimated" />
+            <DetailRow label="Price impact" value={props.priceImpact ?? "Best route"} />
             <DetailRow label="Minimum received" value={`${formatTokenAmount(props.amountOutMin, props.tokenOut.decimals)} ${props.tokenOut.symbol}`} />
             <DetailRow label="Estimated gas" value="Wallet estimate" />
             <DetailRow label="Route" value={props.routeLabel} />

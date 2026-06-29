@@ -61,10 +61,23 @@ vi.mock("wagmi", () => ({
         isConnected: mock.state.isConnected,
     }),
     usePublicClient: () => mock.state.publicClient,
+    useChainId: () => 31337,
     useWriteContract: () => ({
         writeContractAsync: mock.state.writeContractAsync,
         isPending: mock.state.isSwapPending,
     }),
+}));
+
+vi.mock("../hooks/useDeploymentConfig", () => ({
+    useDeploymentConfig: () => ({ deployment: undefined, isLoading: false }),
+}));
+
+vi.mock("../hooks/useLiquidityPair", () => ({
+    useLiquidityPair: () => ({ isLoading: false, refetch: vi.fn() }),
+}));
+
+vi.mock("../hooks/useTokenList", () => ({
+    useTokenList: () => ({ tokens: [], isLoading: false }),
 }));
 
 vi.mock("../hooks/useApproval", () => ({

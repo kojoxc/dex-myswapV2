@@ -1,12 +1,15 @@
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type Address, formatUnits, isAddress } from "viem";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 
 import { routerAbi } from "../abis";
 import { useApproval } from "../hooks/useApproval";
+import { useDeploymentConfig } from "../hooks/useDeploymentConfig";
+import { useLiquidityPair } from "../hooks/useLiquidityPair";
 import { useSwapQuote } from "../hooks/useSwapQuote";
 import { useToken } from "../hooks/useToken";
+import { useTokenList } from "../hooks/useTokenList";
 import { normalizeTransactionError } from "../lib/errors";
 import { formatTokenAmount } from "../lib/format";
 import {
@@ -15,6 +18,7 @@ import {
     DEFAULT_SLIPPAGE_BPS,
     DEFAULT_TOKEN_IN_ADDRESS,
     DEFAULT_TOKEN_OUT_ADDRESS,
+    DEFAULT_WETH_ADDRESS,
     STORAGE_KEYS,
     loadStorage,
     persist,
@@ -29,6 +33,13 @@ import { SwapSettingsDialog } from "./swap/SwapSettingsDialog";
 import { TokenAmountPanel } from "./swap/TokenAmountPanel";
 import { TokenSelectorDialog } from "./swap/TokenSelectorDialog";
 import { TransactionToast } from "./TransactionToast";
+
+function formatPercentBps(value?: bigint) {
+    if (value === undefined) return "-";
+    const whole = value / 100n;
+    const fraction = (value % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+    return fraction ? `${whole}.${fraction}%` : `${whole}%`;
+}
 
 export function SwapCard() {
     const { address: account, chain, isConnected } = useAccount();
@@ -48,9 +59,22 @@ export function SwapCard() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [tokenDialog, setTokenDialog] = useState<"pay" | "receive" | null>(null);
 
+    const deployment = useDeploymentConfig();
+    const tokenList = useTokenList({ deployment: deployment.deployment, extraAddresses: [tokenInAddress, tokenOutAddress] });
+    const wethAddress = deployment.deployment?.weth ?? DEFAULT_WETH_ADDRESS;
+
     const tokenIn = useToken(tokenInAddress, routerAddress);
     const tokenOut = useToken(tokenOutAddress, routerAddress);
-    const quote = useSwapQuote({ routerAddress, tokenIn: tokenIn.token, tokenOut: tokenOut.token, amount, slippageBps });
+    const weth = useToken(wethAddress, routerAddress);
+    const quote = useSwapQuote({
+        routerAddress,
+        tokenIn: tokenIn.token,
+        tokenOut: tokenOut.token,
+        intermediateToken: weth.token,
+        amount,
+        slippageBps,
+    });
+    const quotePair = useLiquidityPair({ routerAddress, tokenA: tokenIn.token, tokenB: tokenOut.token });
 
     const hasValidRouter = isAddress(routerAddress);
     const hasValidTokenInAddress = isAddress(tokenInAddress);
@@ -60,15 +84,30 @@ export function SwapCard() {
     const hasInsufficientBalance = Boolean(isConnected && quote.amountIn !== undefined && tokenIn.balance !== undefined && tokenIn.balance < quote.amountIn);
     const isBusy = isApproving || isSwapPending || isConfirming;
     const networkLabel = chain?.name ?? "EVM";
-    const routeLabel = tokenIn.token && tokenOut.token ? `${tokenIn.token.symbol} to ${tokenOut.token.symbol}` : "Direct token route";
+    const routeLabel = quote.routeLabel ?? (tokenIn.token && tokenOut.token ? `${tokenIn.token.symbol} to ${tokenOut.token.symbol}` : "Direct token route");
     const outputValue = quote.amountOut && tokenOut.token ? formatTokenAmount(quote.amountOut, tokenOut.token.decimals, 8) : "";
     const shouldShowQuote = routeSetupComplete && Boolean(amount) && hasAmount;
     const hasHighSlippage = slippageBps > 5_000;
+
+    useEffect(() => {
+        if (!deployment.deployment) return;
+
+        if (!loadStorage(STORAGE_KEYS.router) && deployment.deployment.router) updateRouter(deployment.deployment.router);
+        if (!loadStorage(STORAGE_KEYS.tokenIn) && deployment.deployment.tokens[0]?.address) updateTokenIn(deployment.deployment.tokens[0].address);
+        if (!loadStorage(STORAGE_KEYS.tokenOut) && deployment.deployment.tokens[1]?.address) updateTokenOut(deployment.deployment.tokens[1].address);
+    }, [deployment.deployment]);
 
     const needsApproval = useMemo(() => {
         if (!quote.amountIn || tokenIn.allowance === undefined) return false;
         return tokenIn.allowance < quote.amountIn;
     }, [quote.amountIn, tokenIn.allowance]);
+
+    const priceImpactBps = useMemo(() => {
+        if (!quote.amountIn || !quote.amountOut || quote.path?.length !== 2 || !quotePair.reserveA || !quotePair.reserveB || quotePair.reserveA === 0n) return undefined;
+        const expectedNoFeeOutput = (quote.amountIn * quotePair.reserveB) / quotePair.reserveA;
+        if (expectedNoFeeOutput === 0n || quote.amountOut >= expectedNoFeeOutput) return 0n;
+        return ((expectedNoFeeOutput - quote.amountOut) * 10_000n) / expectedNoFeeOutput;
+    }, [quote.amountIn, quote.amountOut, quote.path, quotePair.reserveA, quotePair.reserveB]);
 
     const canSubmit = Boolean(
         isConnected &&
@@ -96,7 +135,7 @@ export function SwapCard() {
         if (hasInsufficientBalance) return "Insufficient balance";
         if (quote.error) return "Route unavailable";
         if (quote.isLoading) return "Fetching quote";
-        if (needsApproval) return `Approve ${tokenIn.token.symbol}`;
+        if (needsApproval) return `Approve ${tokenIn.token?.symbol ?? "token"}`;
         return "Swap";
     }, [hasAmount, hasInsufficientBalance, isApproving, isConfirming, isConnected, isSwapPending, needsApproval, publicClient, quote.error, quote.isLoading, routeSetupComplete, tokenIn.token, tokenOut.token, tx.hash, tx.status]);
 
@@ -159,6 +198,7 @@ export function SwapCard() {
         setIsConfirming(true);
         try {
             if (needsApproval) {
+                if (!tokenIn.token) return;
                 setTx({ title: "Approve pending", status: "pending", message: `Approving ${tokenIn.token.symbol}` });
                 const hash = await approve(tokenIn.token.address, routerAddress as Address, quote.amountIn);
                 setTx({ title: "Approve submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
@@ -170,12 +210,13 @@ export function SwapCard() {
             }
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + deadlineMinutes * 60);
+            const path = quote.path ?? [tokenIn.token.address, tokenOut.token.address];
             setTx({ title: "Swap pending", status: "pending", message: "Confirm the transaction in your wallet" });
             const hash = await writeContractAsync({
                 address: routerAddress as Address,
                 abi: routerAbi,
                 functionName: "swapExactTokensForTokens",
-                args: [quote.amountIn, quote.amountOutMin, [tokenIn.token.address, tokenOut.token.address], account, deadline],
+                args: [quote.amountIn, quote.amountOutMin, path, account, deadline],
             });
             setTx({ title: "Swap submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
             const receipt = await publicClient.waitForTransactionReceipt({ hash });
@@ -280,6 +321,7 @@ export function SwapCard() {
                         isLoading={quote.isLoading}
                         error={quote.error}
                         rate={quote.rate}
+                        priceImpact={formatPercentBps(priceImpactBps)}
                         amountOutMin={quote.amountOutMin}
                         tokenIn={tokenIn.token}
                         tokenOut={tokenOut.token}
@@ -318,6 +360,8 @@ export function SwapCard() {
                 isValidAddress={hasValidTokenInAddress}
                 isLoading={tokenIn.isLoading}
                 error={tokenIn.error}
+                tokens={tokenList.tokens}
+                tokenListLoading={tokenList.isLoading || deployment.isLoading}
                 onChange={updateTokenIn}
                 onClose={() => setTokenDialog(null)}
             />
@@ -330,6 +374,8 @@ export function SwapCard() {
                 isValidAddress={hasValidTokenOutAddress}
                 isLoading={tokenOut.isLoading}
                 error={tokenOut.error}
+                tokens={tokenList.tokens}
+                tokenListLoading={tokenList.isLoading || deployment.isLoading}
                 onChange={updateTokenOut}
                 onClose={() => setTokenDialog(null)}
             />

@@ -1,12 +1,14 @@
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type Address, formatUnits, isAddress, parseUnits } from "viem";
 import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 
 import { routerAbi } from "../abis";
 import { useApproval } from "../hooks/useApproval";
+import { useDeploymentConfig } from "../hooks/useDeploymentConfig";
 import { useLiquidityPair } from "../hooks/useLiquidityPair";
 import { useToken } from "../hooks/useToken";
+import { useTokenList } from "../hooks/useTokenList";
 import { normalizeTransactionError } from "../lib/errors";
 import { compactAddress, formatTokenAmount } from "../lib/format";
 import {
@@ -30,6 +32,7 @@ import { TokenSelectorDialog } from "./swap/TokenSelectorDialog";
 import { TransactionToast } from "./TransactionToast";
 
 type LiquidityMode = "add" | "remove";
+type LastEditedAmount = "tokenA" | "tokenB" | null;
 
 function parseTokenAmount(value: string, decimals: number) {
     if (!value.trim()) return undefined;
@@ -56,19 +59,54 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     );
 }
 
-export function LiquidityCard() {
+function minBigInt(left: bigint, right: bigint) {
+    return left < right ? left : right;
+}
+
+function sqrtBigInt(value: bigint) {
+    if (value < 2n) return value;
+
+    let x0 = value / 2n;
+    let x1 = (x0 + value / x0) / 2n;
+
+    while (x1 < x0) {
+        x0 = x1;
+        x1 = (x0 + value / x0) / 2n;
+    }
+
+    return x0;
+}
+
+function formatPercentBps(value?: bigint) {
+    if (value === undefined) return "-";
+    const whole = value / 100n;
+    const fraction = (value % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+    return fraction ? `${whole}.${fraction}%` : `${whole}%`;
+}
+
+function quoteLiquidityAmount(input?: bigint, reserveIn?: bigint, reserveOut?: bigint) {
+    if (!input || !reserveIn || !reserveOut || reserveIn === 0n) return undefined;
+    return (input * reserveOut) / reserveIn;
+}
+
+type LiquidityCardProps = {
+    defaultMode?: LiquidityMode;
+};
+
+export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     const { address: account, chain, isConnected } = useAccount();
     const { openConnectModal } = useConnectModal();
     const publicClient = usePublicClient();
     const { approve, isApproving } = useApproval();
     const { writeContractAsync, isPending: isWritePending } = useWriteContract();
 
-    const [mode, setMode] = useState<LiquidityMode>("add");
+    const [mode, setMode] = useState<LiquidityMode>(defaultMode);
     const [routerAddress, setRouterAddress] = useState(() => loadStorage(STORAGE_KEYS.router, DEFAULT_ROUTER_ADDRESS));
     const [tokenAAddress, setTokenAAddress] = useState(() => loadStorage(STORAGE_KEYS.tokenIn, DEFAULT_TOKEN_IN_ADDRESS));
     const [tokenBAddress, setTokenBAddress] = useState(() => loadStorage(STORAGE_KEYS.tokenOut, DEFAULT_TOKEN_OUT_ADDRESS));
     const [amountA, setAmountA] = useState("");
     const [amountB, setAmountB] = useState("");
+    const [lastEditedAmount, setLastEditedAmount] = useState<LastEditedAmount>(null);
     const [lpAmount, setLpAmount] = useState("");
     const [slippageBps, setSlippageBps] = useState(() => sanitizeSlippageBps(Number(loadStorage(STORAGE_KEYS.slippageBps, String(DEFAULT_SLIPPAGE_BPS)))));
     const [deadlineMinutes, setDeadlineMinutes] = useState(() => sanitizeDeadlineMinutes(Number(loadStorage(STORAGE_KEYS.deadlineMinutes, String(DEFAULT_DEADLINE_MINUTES)))));
@@ -76,6 +114,9 @@ export function LiquidityCard() {
     const [isConfirming, setIsConfirming] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [tokenDialog, setTokenDialog] = useState<"tokenA" | "tokenB" | null>(null);
+
+    const deployment = useDeploymentConfig();
+    const tokenList = useTokenList({ deployment: deployment.deployment, extraAddresses: [tokenAAddress, tokenBAddress] });
 
     const tokenA = useToken(tokenAAddress, routerAddress);
     const tokenB = useToken(tokenBAddress, routerAddress);
@@ -114,6 +155,31 @@ export function LiquidityCard() {
     const needsLpApproval = Boolean(lpAmountValue !== undefined && lpToken.allowance !== undefined && lpToken.allowance < lpAmountValue);
     const pairLabel = tokenPairLabel(tokenA.token, tokenB.token);
     const hasHighSlippage = slippageBps > 5_000;
+    const hasExistingPool = Boolean(pair.pairAddress && pair.reserveA !== undefined && pair.reserveB !== undefined && pair.totalSupply !== undefined && pair.totalSupply > 0n);
+
+    useEffect(() => {
+        if (!tokenA.token || !tokenB.token || !hasExistingPool) return;
+
+        if (lastEditedAmount === "tokenA") {
+            const nextAmountB = quoteLiquidityAmount(amountAValue, pair.reserveA, pair.reserveB);
+            const nextValue = nextAmountB === undefined ? "" : formatUnits(nextAmountB, tokenB.token.decimals);
+            if (amountB !== nextValue) setAmountB(nextValue);
+        }
+
+        if (lastEditedAmount === "tokenB") {
+            const nextAmountA = quoteLiquidityAmount(amountBValue, pair.reserveB, pair.reserveA);
+            const nextValue = nextAmountA === undefined ? "" : formatUnits(nextAmountA, tokenA.token.decimals);
+            if (amountA !== nextValue) setAmountA(nextValue);
+        }
+    }, [amountA, amountAValue, amountB, amountBValue, hasExistingPool, lastEditedAmount, pair.reserveA, pair.reserveB, tokenA.token, tokenB.token]);
+
+    useEffect(() => {
+        if (!deployment.deployment) return;
+
+        if (!loadStorage(STORAGE_KEYS.router) && deployment.deployment.router) updateRouter(deployment.deployment.router);
+        if (!loadStorage(STORAGE_KEYS.tokenIn) && deployment.deployment.tokens[0]?.address) updateTokenA(deployment.deployment.tokens[0].address);
+        if (!loadStorage(STORAGE_KEYS.tokenOut) && deployment.deployment.tokens[1]?.address) updateTokenB(deployment.deployment.tokens[1].address);
+    }, [deployment.deployment]);
 
     const canAdd = Boolean(
         isConnected &&
@@ -163,6 +229,25 @@ export function LiquidityCard() {
     }, [hasAddAmounts, hasInsufficientAddBalance, hasInsufficientLpBalance, isApproving, isConfirming, isConnected, isWritePending, lpAmountValue, mode, needsLpApproval, needsTokenAApproval, needsTokenBApproval, pair.error, pair.isLoading, pair.pairAddress, publicClient, routeSetupComplete, tokenA.token, tokenB.token, tx.hash, tx.status]);
 
     const isActionDisabled = isConnected ? (mode === "add" ? !canAdd : !canRemove) : !openConnectModal || isBusy;
+    const estimatedLp = useMemo(() => {
+        if (amountAValue === undefined || amountBValue === undefined) return undefined;
+
+        if (hasExistingPool && pair.reserveA && pair.reserveB && pair.totalSupply) {
+            return minBigInt((amountAValue * pair.totalSupply) / pair.reserveA, (amountBValue * pair.totalSupply) / pair.reserveB);
+        }
+
+        const initialLiquidity = sqrtBigInt(amountAValue * amountBValue);
+        return initialLiquidity > 1_000n ? initialLiquidity - 1_000n : 0n;
+    }, [amountAValue, amountBValue, hasExistingPool, pair.reserveA, pair.reserveB, pair.totalSupply]);
+    const poolShareBps = useMemo(() => {
+        if (!estimatedLp || estimatedLp === 0n) return undefined;
+        const totalSupplyAfter = (pair.totalSupply ?? 0n) + estimatedLp;
+        if (totalSupplyAfter === 0n) return undefined;
+        return (estimatedLp * 10_000n) / totalSupplyAfter;
+    }, [estimatedLp, pair.totalSupply]);
+    const depositRatio = amountAValue && amountBValue && tokenA.token && tokenB.token
+        ? `1 ${tokenA.token.symbol} = ${formatTokenAmount((amountBValue * 10n ** BigInt(tokenA.token.decimals)) / amountAValue, tokenB.token.decimals, 6)} ${tokenB.token.symbol}`
+        : "-";
 
     function updateRouter(value: string) {
         setRouterAddress(value);
@@ -193,17 +278,29 @@ export function LiquidityCard() {
 
     function setMaxTokenA() {
         if (!tokenA.balance || !tokenA.token) return;
+        setLastEditedAmount("tokenA");
         setAmountA(formatUnits(tokenA.balance, tokenA.token.decimals));
     }
 
     function setMaxTokenB() {
         if (!tokenB.balance || !tokenB.token) return;
+        setLastEditedAmount("tokenB");
         setAmountB(formatUnits(tokenB.balance, tokenB.token.decimals));
     }
 
-    function setMaxLp() {
+    function setLpPercent(percentBps: bigint) {
         if (!lpToken.balance) return;
-        setLpAmount(formatUnits(lpToken.balance, 18));
+        setLpAmount(formatUnits((lpToken.balance * percentBps) / 10_000n, 18));
+    }
+
+    function handleAmountAChange(value: string) {
+        setLastEditedAmount("tokenA");
+        setAmountA(value);
+    }
+
+    function handleAmountBChange(value: string) {
+        setLastEditedAmount("tokenB");
+        setAmountB(value);
     }
 
     async function submitAdd() {
@@ -358,7 +455,7 @@ export function LiquidityCard() {
                             balance={tokenA.balance}
                             showMax
                             tokenTone="pay"
-                            onAmountChange={setAmountA}
+                            onAmountChange={handleAmountAChange}
                             onMax={setMaxTokenA}
                             onTokenClick={() => setTokenDialog("tokenA")}
                         />
@@ -369,10 +466,13 @@ export function LiquidityCard() {
                             balance={tokenB.balance}
                             showMax
                             tokenTone="receive"
-                            onAmountChange={setAmountB}
+                            onAmountChange={handleAmountBChange}
                             onMax={setMaxTokenB}
                             onTokenClick={() => setTokenDialog("tokenB")}
                         />
+                        {hasExistingPool ? (
+                            <p className="px-2 pt-2 text-xs text-slate-500">Amounts auto-follow the current reserve ratio. Edit either side to recalculate the other.</p>
+                        ) : null}
                     </div>
                 ) : (
                     <section className="min-w-0 w-full max-w-full rounded-[1.25rem] bg-[#151b29] p-4 shadow-inner" aria-label="LP amount panel">
@@ -383,13 +483,23 @@ export function LiquidityCard() {
                                 </label>
                                 <p className="mt-1 truncate text-xs text-slate-500">Balance: {formatTokenAmount(lpToken.balance, 18)} UNI-V2</p>
                             </div>
-                            <button
-                                type="button"
-                                onClick={setMaxLp}
-                                className="rounded-full bg-pink-500/15 px-3 py-1 text-xs font-black text-pink-100 transition hover:bg-pink-500/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                            >
-                                MAX
-                            </button>
+                            <div className="flex shrink-0 items-center gap-1">
+                                {[
+                                    { label: "25%", percent: 2_500n },
+                                    { label: "50%", percent: 5_000n },
+                                    { label: "75%", percent: 7_500n },
+                                    { label: "MAX", percent: 10_000n },
+                                ].map(({ label, percent }) => (
+                                    <button
+                                        key={label}
+                                        type="button"
+                                        onClick={() => setLpPercent(percent)}
+                                        className="rounded-full bg-pink-500/15 px-2.5 py-1 text-xs font-black text-pink-100 transition hover:bg-pink-500/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                         <div className="mt-4 flex min-w-0 w-full max-w-full items-center gap-2">
                             <input
@@ -412,7 +522,12 @@ export function LiquidityCard() {
                         <DetailRow label="Pool" value={pairLabel} />
                         <DetailRow label="Pair" value={pair.isLoading ? "Finding pool..." : pair.pairAddress ? compactAddress(pair.pairAddress) : mode === "add" ? "Will be created" : "Not found"} />
                         {mode === "add" ? (
-                            <DetailRow label="Slippage" value={`${slippageBps / 100}%`} />
+                            <>
+                                <DetailRow label="Deposit ratio" value={depositRatio} />
+                                <DetailRow label="Estimated LP" value={formatTokenAmount(estimatedLp, 18)} />
+                                <DetailRow label="Pool share" value={formatPercentBps(poolShareBps)} />
+                                <DetailRow label="Slippage" value={`${slippageBps / 100}%`} />
+                            </>
                         ) : (
                             <>
                                 <DetailRow label="Receive A" value={`${formatTokenAmount(expectedTokenA, tokenA.token?.decimals ?? 18)} ${tokenA.token?.symbol ?? ""}`} />
@@ -476,6 +591,8 @@ export function LiquidityCard() {
                 isValidAddress={hasValidTokenAAddress}
                 isLoading={tokenA.isLoading}
                 error={tokenA.error}
+                tokens={tokenList.tokens}
+                tokenListLoading={tokenList.isLoading || deployment.isLoading}
                 onChange={updateTokenA}
                 onClose={() => setTokenDialog(null)}
             />
@@ -488,6 +605,8 @@ export function LiquidityCard() {
                 isValidAddress={hasValidTokenBAddress}
                 isLoading={tokenB.isLoading}
                 error={tokenB.error}
+                tokens={tokenList.tokens}
+                tokenListLoading={tokenList.isLoading || deployment.isLoading}
                 onChange={updateTokenB}
                 onClose={() => setTokenDialog(null)}
             />

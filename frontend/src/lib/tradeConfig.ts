@@ -11,6 +11,7 @@ export const DEFAULT_DEADLINE_MINUTES = 20;
 export const DEFAULT_ROUTER_ADDRESS = import.meta.env.VITE_ROUTER_ADDRESS ?? "";
 export const DEFAULT_TOKEN_IN_ADDRESS = import.meta.env.VITE_TOKEN_IN_ADDRESS ?? "";
 export const DEFAULT_TOKEN_OUT_ADDRESS = import.meta.env.VITE_TOKEN_OUT_ADDRESS ?? "";
+export const DEFAULT_WETH_ADDRESS = import.meta.env.VITE_WETH_ADDRESS ?? "";
 
 export function sanitizeSlippageBps(value: number) {
     if (!Number.isFinite(value)) return DEFAULT_SLIPPAGE_BPS;

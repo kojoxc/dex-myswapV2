@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import type { Address } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,10 +70,19 @@ vi.mock("wagmi", () => ({
         isConnected: mock.state.isConnected,
     }),
     usePublicClient: () => mock.state.publicClient,
+    useChainId: () => 31337,
     useWriteContract: () => ({
         writeContractAsync: mock.state.writeContractAsync,
         isPending: mock.state.isWritePending,
     }),
+}));
+
+vi.mock("../hooks/useDeploymentConfig", () => ({
+    useDeploymentConfig: () => ({ deployment: undefined, isLoading: false }),
+}));
+
+vi.mock("../hooks/useTokenList", () => ({
+    useTokenList: () => ({ tokens: [], isLoading: false }),
 }));
 
 vi.mock("../hooks/useApproval", () => ({
@@ -172,7 +182,7 @@ describe("LiquidityCard", () => {
         renderConfigured();
 
         await user.type(screen.getByLabelText("Token A"), "1");
-        await user.type(screen.getByLabelText("Token B"), "2");
+        await waitFor(() => expect(screen.getByLabelText("Token B")).toHaveValue("2"));
         await user.click(screen.getByRole("button", { name: "Add liquidity" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
@@ -190,7 +200,7 @@ describe("LiquidityCard", () => {
         });
 
         await user.type(screen.getByLabelText("Token A"), "1");
-        await user.type(screen.getByLabelText("Token B"), "2");
+        await waitFor(() => expect(screen.getByLabelText("Token B")).toHaveValue("2"));
         await user.click(screen.getByRole("button", { name: "Approve TKNA" }));
 
         await waitFor(() => expect(mock.state.approve).toHaveBeenCalledTimes(1));
@@ -228,7 +238,11 @@ describe("LiquidityCard", () => {
         mock.state = createState();
         window.innerWidth = 320;
 
-        render(<LiquidityPage />);
+        render(
+            <MemoryRouter>
+                <LiquidityPage />
+            </MemoryRouter>,
+        );
 
         expect(screen.getByLabelText("Manage liquidity")).toBeInTheDocument();
         expect(screen.queryByText("Clean EVM token swaps.")).not.toBeInTheDocument();
