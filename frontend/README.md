@@ -1,12 +1,32 @@
 # MySwap V2 Frontend
 
-Minimal static frontend for local/manual testing.
+Static React frontend for the MySwap V2 router. It targets local Anvil development by default and builds to plain static files in `dist/`.
+
+## Stack
+
+- Vite + React + TypeScript
+- wagmi + viem
+- RainbowKit
+- TanStack Query
+- Tailwind CSS
 
 ## Usage
 
-1. Deploy contracts with `forge script script/DeployLocal.s.sol --broadcast --rpc-url <RPC_URL>`.
-2. Serve this folder with any static server, for example `python3 -m http.server 5173` from `frontend/`.
-3. Open `http://localhost:5173`, connect a wallet, fill Router/Factory/Token addresses, and save config.
-4. Approve both tokens before adding liquidity or swapping.
+1. Start Anvil: `anvil`.
+2. Deploy contracts from the repository root: `forge script script/DeployLocal.s.sol --broadcast --rpc-url http://127.0.0.1:8545`.
+3. Install frontend dependencies: `npm install`.
+4. Run the frontend from this folder: `npm run dev`.
+5. Open `http://localhost:5173`, connect wallet, paste Router and token addresses, then swap.
 
-This frontend intentionally has no build pipeline. It uses ethers from a CDN and is meant as a lightweight integration surface while the DEX contracts evolve.
+## Build
+
+```shell
+npm run build
+```
+
+The output is static and can be served from `dist/` by any static hosting provider.
+
+## Environment
+
+- `VITE_RPC_URL`: defaults to `http://127.0.0.1:8545`.
+- `VITE_WALLETCONNECT_PROJECT_ID`: optional RainbowKit WalletConnect project id.
