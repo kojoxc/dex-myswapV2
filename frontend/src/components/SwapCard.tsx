@@ -7,7 +7,20 @@ import { routerAbi } from "../abis";
 import { useApproval } from "../hooks/useApproval";
 import { useSwapQuote } from "../hooks/useSwapQuote";
 import { useToken } from "../hooks/useToken";
+import { normalizeTransactionError } from "../lib/errors";
 import { formatTokenAmount } from "../lib/format";
+import {
+    DEFAULT_DEADLINE_MINUTES,
+    DEFAULT_ROUTER_ADDRESS,
+    DEFAULT_SLIPPAGE_BPS,
+    DEFAULT_TOKEN_IN_ADDRESS,
+    DEFAULT_TOKEN_OUT_ADDRESS,
+    STORAGE_KEYS,
+    loadStorage,
+    persist,
+    sanitizeDeadlineMinutes,
+    sanitizeSlippageBps,
+} from "../lib/tradeConfig";
 import type { TransactionState } from "../types";
 import { QuoteDetails } from "./swap/QuoteDetails";
 import { SwapActionButton } from "./swap/SwapActionButton";
@@ -16,53 +29,6 @@ import { SwapSettingsDialog } from "./swap/SwapSettingsDialog";
 import { TokenAmountPanel } from "./swap/TokenAmountPanel";
 import { TokenSelectorDialog } from "./swap/TokenSelectorDialog";
 import { TransactionToast } from "./TransactionToast";
-
-const STORAGE_KEYS = {
-    router: "myswap:v2:router",
-    tokenIn: "myswap:v2:tokenIn",
-    tokenOut: "myswap:v2:tokenOut",
-    slippageBps: "myswap:v2:slippageBps",
-    deadlineMinutes: "myswap:v2:deadlineMinutes",
-};
-
-const DEFAULT_SLIPPAGE_BPS = 50;
-const DEFAULT_DEADLINE_MINUTES = 20;
-const DEFAULT_ROUTER_ADDRESS = import.meta.env.VITE_ROUTER_ADDRESS ?? "";
-const DEFAULT_TOKEN_IN_ADDRESS = import.meta.env.VITE_TOKEN_IN_ADDRESS ?? "";
-const DEFAULT_TOKEN_OUT_ADDRESS = import.meta.env.VITE_TOKEN_OUT_ADDRESS ?? "";
-
-function sanitizeSlippageBps(value: number) {
-    if (!Number.isFinite(value)) return DEFAULT_SLIPPAGE_BPS;
-    return Math.min(9_900, Math.max(0, Math.round(value)));
-}
-
-function sanitizeDeadlineMinutes(value: number) {
-    if (!Number.isFinite(value)) return DEFAULT_DEADLINE_MINUTES;
-    return Math.max(1, Math.floor(value));
-}
-
-function loadStorage(key: string, fallback = "") {
-    return localStorage.getItem(key) ?? fallback;
-}
-
-function persist(key: string, value: string) {
-    localStorage.setItem(key, value);
-}
-
-function normalizeError(caught: unknown, fallback: string) {
-    if (!(caught instanceof Error)) return fallback;
-
-    const message = caught.message.toLowerCase();
-    if (message.includes("user rejected") || message.includes("user denied") || message.includes("rejected the request")) {
-        return "Transaction was rejected in your wallet.";
-    }
-    if (message.includes("insufficient funds")) return "Wallet does not have enough gas to submit the transaction.";
-    if (message.includes("timeout") || message.includes("timed out")) return "RPC timeout. Try again or switch RPC/network.";
-    if (message.includes("revert") || message.includes("reverted")) return "Transaction reverted on-chain. Check liquidity, route, and minimum received.";
-    if (message.includes("network") || message.includes("chain")) return "Unsupported network or RPC unavailable.";
-
-    return fallback;
-}
 
 export function SwapCard() {
     const { address: account, chain, isConnected } = useAccount();
@@ -221,7 +187,7 @@ export function SwapCard() {
             setTx({
                 title: needsApproval ? "Approve failed" : "Swap failed",
                 status: "error",
-                message: normalizeError(caught, needsApproval ? "Approval failed. Try again from your wallet." : "Swap failed. Check route, liquidity, and wallet status."),
+                message: normalizeTransactionError(caught, needsApproval ? "Approval failed. Try again from your wallet." : "Swap failed. Check route, liquidity, and wallet status."),
             });
         } finally {
             setIsConfirming(false);

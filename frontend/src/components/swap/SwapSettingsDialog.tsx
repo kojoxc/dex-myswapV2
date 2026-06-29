@@ -2,6 +2,10 @@ import { Dialog } from "./Dialog";
 
 type SwapSettingsDialogProps = {
     open: boolean;
+    title?: string;
+    routeTitle?: string;
+    tokenInLabel?: string;
+    tokenOutLabel?: string;
     routerAddress: string;
     tokenInAddress: string;
     tokenOutAddress: string;
@@ -49,14 +53,18 @@ function ContractInput({ label, value, placeholder, isValid, onChange }: Contrac
 export function SwapSettingsDialog(props: SwapSettingsDialogProps) {
     const slippagePercent = props.slippageBps / 100;
     const hasHighSlippage = props.slippageBps > 5_000;
+    const title = props.title ?? "Swap settings";
+    const routeTitle = props.routeTitle ?? "Route configuration";
+    const tokenInLabel = props.tokenInLabel ?? "Pay token address";
+    const tokenOutLabel = props.tokenOutLabel ?? "Receive token address";
 
     return (
-        <Dialog open={props.open} title="Swap settings" onClose={props.onClose}>
+        <Dialog open={props.open} title={title} onClose={props.onClose}>
             <div className="grid gap-5">
                 <section className="grid gap-3" aria-labelledby="route-settings-title">
                     <div>
                         <h3 id="route-settings-title" className="text-sm font-black text-white">
-                            Route configuration
+                            {routeTitle}
                         </h3>
                         <p className="mt-1 text-sm leading-6 text-slate-400">Only needed for local or development deployments.</p>
                     </div>
@@ -69,14 +77,14 @@ export function SwapSettingsDialog(props: SwapSettingsDialogProps) {
                         onChange={props.onRouterChange}
                     />
                     <ContractInput
-                        label="Pay token address"
+                        label={tokenInLabel}
                         value={props.tokenInAddress}
                         placeholder="0x token contract"
                         isValid={props.hasValidTokenInAddress}
                         onChange={props.onTokenInChange}
                     />
                     <ContractInput
-                        label="Receive token address"
+                        label={tokenOutLabel}
                         value={props.tokenOutAddress}
                         placeholder="0x token contract"
                         isValid={props.hasValidTokenOutAddress}

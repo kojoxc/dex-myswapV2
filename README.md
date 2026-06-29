@@ -14,7 +14,7 @@ This repository now contains a working Uniswap V2-style learning DEX core and pe
 - `src/mocks/MockERC20.sol`: unrestricted ERC20 mock for tests/local deployments.
 - `src/mocks/WETH9.sol`: local WETH-compatible mock.
 - `script/`: Foundry deployment and interaction scripts.
-- `frontend/`: static lightweight wallet UI for local/manual testing.
+- `frontend/`: Vite + React wallet UI for swaps and liquidity management.
 - `test/`: unit, fuzz, invariant, and integration tests.
 
 ## Roadmap
@@ -24,10 +24,9 @@ This repository now contains a working Uniswap V2-style learning DEX core and pe
    - deeper fee-on and TWAP scenarios
    - gas snapshots
 2. Add frontend polish:
-   - pair discovery
-   - quote preview
    - ETH swap forms
-   - LP balance/removal UI
+   - token list/pair discovery UX
+   - multi-hop route controls
 3. Add deployment hardening:
    - network config files
    - broadcast verification notes
@@ -46,6 +45,15 @@ forge test -vvv
 forge coverage
 ```
 
+Frontend checks:
+
+```shell
+cd frontend
+npm ci
+npm test
+npm run build
+```
+
 ## Deployment Scripts
 
 ```shell
@@ -57,14 +65,23 @@ ROUTER=<router> TOKEN_IN=<tokenA> TOKEN_OUT=<tokenB> forge script script/SwapExa
 
 ## Frontend
 
-The frontend is static and has no build step.
+The frontend is a static Vite + React app. It supports token-token swaps and add/remove liquidity for a configured router/token pair.
 
 ```shell
 cd frontend
-python3 -m http.server 5173
+npm install
+npm run dev
 ```
 
-Then open `http://localhost:5173` and enter the deployed Router, Factory, and token addresses.
+Then open `http://localhost:5173`, connect a wallet, and enter the deployed Router and token addresses in the settings dialog.
+
+Common frontend environment variables:
+
+- `VITE_RPC_URL`: defaults to `http://127.0.0.1:8545`.
+- `VITE_ROUTER_ADDRESS`: optional default router address.
+- `VITE_TOKEN_IN_ADDRESS`: optional default token A/pay token address.
+- `VITE_TOKEN_OUT_ADDRESS`: optional default token B/receive token address.
+- `VITE_WALLETCONNECT_PROJECT_ID`: optional RainbowKit WalletConnect project id.
 
 ## Notes
 
