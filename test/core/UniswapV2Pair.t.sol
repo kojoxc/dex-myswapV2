@@ -242,8 +242,31 @@ contract UniswapV2PairTest is Test {
         vm.warp(block.timestamp + 10);
         _addLiquidity(address(this), 1 ether, 2 ether);
 
-        assertGt(pair.price0CumulativeLast(), 0);
-        assertGt(pair.price1CumulativeLast(), 0);
+        assertEq(pair.price0CumulativeLast(), _expectedCumulative(5 ether, 10 ether, 10));
+        assertEq(pair.price1CumulativeLast(), _expectedCumulative(10 ether, 5 ether, 10));
+    }
+
+    function testPriceCumulativeDoesNotUpdateInSameBlock() public {
+        _addLiquidity(address(this), 5 ether, 10 ether);
+
+        uint256 price0Before = pair.price0CumulativeLast();
+        uint256 price1Before = pair.price1CumulativeLast();
+
+        pair.sync();
+
+        assertEq(pair.price0CumulativeLast(), price0Before);
+        assertEq(pair.price1CumulativeLast(), price1Before);
+    }
+
+    function testPriceCumulativeHandlesTimestampWraparound() public {
+        vm.warp(uint256(type(uint32).max) - 5);
+        _addLiquidity(address(this), 5 ether, 10 ether);
+
+        vm.warp(uint256(type(uint32).max) + 5);
+        pair.sync();
+
+        assertEq(pair.price0CumulativeLast(), _expectedCumulative(5 ether, 10 ether, 10));
+        assertEq(pair.price1CumulativeLast(), _expectedCumulative(10 ether, 5 ether, 10));
     }
 
     function testFeeOnMintsProtocolLiquidity() public {
@@ -287,5 +310,13 @@ contract UniswapV2PairTest is Test {
     function _getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) private pure returns (uint256) {
         uint256 amountInWithFee = amountIn * 997;
         return (amountInWithFee * reserveOut) / (reserveIn * 1_000 + amountInWithFee);
+    }
+
+    function _expectedCumulative(uint256 reserveIn, uint256 reserveOut, uint256 elapsed)
+        private
+        pure
+        returns (uint256)
+    {
+        return ((reserveOut * elapsed) << 112) / reserveIn;
     }
 }

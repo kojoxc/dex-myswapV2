@@ -37,6 +37,33 @@ jobs:
       - name: Run Forge tests
         run: forge test -vvv
 
+      - name: Run Forge coverage
+        run: forge coverage --report summary
+
+      - name: Generate gas snapshot
+        run: forge snapshot
+
+  security:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Slither
+        run: pipx install slither-analyzer
+
+      - name: Run Slither
+        continue-on-error: true
+        run: slither . --filter-paths "lib|test|script|frontend"
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isAddress } from "viem";
 
@@ -6,6 +6,8 @@ import { useDeploymentConfig } from "../hooks/useDeploymentConfig";
 import { type PoolInfo, usePools } from "../hooks/usePools";
 import { compactAddress, formatTokenAmount } from "../lib/format";
 import { DEFAULT_ROUTER_ADDRESS, STORAGE_KEYS, loadStorage, persist } from "../lib/tradeConfig";
+
+type PoolSortMode = "liquidity" | "userLp" | "pair";
 
 function PoolSkeleton() {
     return (
@@ -78,7 +80,10 @@ export function PoolsPage() {
     const navigate = useNavigate();
     const deployment = useDeploymentConfig();
     const [routerAddress, setRouterAddress] = useState(() => loadStorage(STORAGE_KEYS.router, DEFAULT_ROUTER_ADDRESS));
-    const pools = usePools(routerAddress);
+    const [search, setSearch] = useState("");
+    const [sortMode, setSortMode] = useState<PoolSortMode>("liquidity");
+    const [pairLimit, setPairLimit] = useState(50);
+    const pools = usePools(routerAddress, pairLimit);
 
     useEffect(() => {
         if (!loadStorage(STORAGE_KEYS.router) && deployment.deployment?.router) {
@@ -89,6 +94,7 @@ export function PoolsPage() {
 
     function handleRouterChange(value: string) {
         setRouterAddress(value);
+        setPairLimit(50);
         persist(STORAGE_KEYS.router, value);
     }
 
@@ -99,6 +105,31 @@ export function PoolsPage() {
     }
 
     const hasValidRouter = isAddress(routerAddress);
+    const filteredPools = useMemo(() => {
+        const query = search.trim().toLowerCase();
+        const nextPools = query
+            ? pools.pools.filter((pool) => {
+                  const pairLabel = `${pool.tokenA.symbol} / ${pool.tokenB.symbol}`.toLowerCase();
+                  return (
+                      pairLabel.includes(query) ||
+                      pool.pairAddress.toLowerCase() === query ||
+                      pool.tokenA.address.toLowerCase() === query ||
+                      pool.tokenB.address.toLowerCase() === query ||
+                      pool.tokenA.name.toLowerCase().includes(query) ||
+                      pool.tokenB.name.toLowerCase().includes(query)
+                  );
+              })
+            : [...pools.pools];
+
+        nextPools.sort((left, right) => {
+            if (sortMode === "pair") return `${left.tokenA.symbol}/${left.tokenB.symbol}`.localeCompare(`${right.tokenA.symbol}/${right.tokenB.symbol}`);
+            if (sortMode === "userLp") return Number((right.userLpBalance ?? 0n) - (left.userLpBalance ?? 0n));
+            return Number(right.totalSupply - left.totalSupply);
+        });
+
+        return nextPools;
+    }, [pools.pools, search, sortMode]);
+    const canLoadMore = hasValidRouter && !pools.isLoading && !pools.error && pools.totalPairs > pairLimit;
 
     return (
         <div className="min-h-[calc(100vh-5rem)] w-full px-4 py-8 sm:min-h-[calc(100vh-5.5rem)] sm:px-6">
@@ -122,6 +153,31 @@ export function PoolsPage() {
                     </label>
                 </div>
 
+                <div className="mt-4 grid gap-3 rounded-[1.35rem] border border-white/10 bg-white/[0.035] p-4 sm:grid-cols-[1fr_14rem]">
+                    <label className="grid gap-2 text-sm font-bold text-slate-300">
+                        Search pools
+                        <input
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
+                            placeholder="Symbol, token address, or pair address"
+                            spellCheck={false}
+                            className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-slate-300">
+                        Sort by
+                        <select
+                            value={sortMode}
+                            onChange={(event) => setSortMode(event.target.value as PoolSortMode)}
+                            className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        >
+                            <option value="liquidity">Total LP</option>
+                            <option value="userLp">Your LP</option>
+                            <option value="pair">Pair name</option>
+                        </select>
+                    </label>
+                </div>
+
                 {!hasValidRouter ? (
                     <div className="mt-5 rounded-[1.35rem] border border-dashed border-white/10 bg-white/[0.035] p-6 text-center text-slate-400">
                         Configure a router address to discover pools.
@@ -141,12 +197,30 @@ export function PoolsPage() {
                         <p className="font-black text-white">No pools found</p>
                         <p className="mt-2 text-sm text-slate-400">Create the first pair from the Liquidity page.</p>
                     </div>
-                ) : (
-                    <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {pools.pools.map((pool) => (
-                            <PoolCard key={pool.pairAddress} pool={pool} onAction={handleAction} />
-                        ))}
+                ) : filteredPools.length === 0 ? (
+                    <div className="mt-5 rounded-[1.35rem] border border-dashed border-white/10 bg-white/[0.035] p-6 text-center">
+                        <p className="font-black text-white">No matching pools</p>
+                        <p className="mt-2 text-sm text-slate-400">Try a different token symbol, token address, or pair address.</p>
                     </div>
+                ) : (
+                    <>
+                        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            {filteredPools.map((pool) => (
+                                <PoolCard key={pool.pairAddress} pool={pool} onAction={handleAction} />
+                            ))}
+                        </div>
+                        {canLoadMore ? (
+                            <div className="mt-5 flex justify-center">
+                                <button
+                                    type="button"
+                                    onClick={() => setPairLimit((value) => value + 50)}
+                                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                                >
+                                    Load more pools ({pools.pools.length}/{pools.totalPairs})
+                                </button>
+                            </div>
+                        ) : null}
+                    </>
                 )}
             </section>
         </div>

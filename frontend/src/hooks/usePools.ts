@@ -25,11 +25,12 @@ async function loadToken(publicClient: NonNullable<ReturnType<typeof usePublicCl
     return { address, name, symbol, decimals };
 }
 
-export function usePools(routerAddress: string) {
+export function usePools(routerAddress: string, pairLimit = 50) {
     const publicClient = usePublicClient();
     const { address: account } = useAccount();
     const [pools, setPools] = useState<PoolInfo[]>([]);
     const [factoryAddress, setFactoryAddress] = useState<Address>();
+    const [totalPairs, setTotalPairs] = useState(0);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string>();
     const [nonce, setNonce] = useState(0);
@@ -40,6 +41,7 @@ export function usePools(routerAddress: string) {
         async function loadPools() {
             setPools([]);
             setFactoryAddress(undefined);
+            setTotalPairs(0);
             setError(undefined);
 
             if (!publicClient || !isAddress(routerAddress)) {
@@ -52,7 +54,8 @@ export function usePools(routerAddress: string) {
             try {
                 const factory = await publicClient.readContract({ address: routerAddress as Address, abi: routerAbi, functionName: "factory" });
                 const pairCount = await publicClient.readContract({ address: factory, abi: factoryAbi, functionName: "allPairsLength" });
-                const cappedPairCount = Math.min(Number(pairCount), 50);
+                const totalPairCount = Number(pairCount);
+                const cappedPairCount = Math.min(totalPairCount, Math.max(1, pairLimit));
                 const pairIndexes = Array.from({ length: cappedPairCount }, (_, index) => BigInt(index));
 
                 const pairAddresses = await Promise.all(
@@ -88,6 +91,7 @@ export function usePools(routerAddress: string) {
 
                 if (!cancelled) {
                     setFactoryAddress(factory);
+                    setTotalPairs(totalPairCount);
                     setPools(nextPools);
                 }
             } catch (caught) {
@@ -102,7 +106,7 @@ export function usePools(routerAddress: string) {
         return () => {
             cancelled = true;
         };
-    }, [account, nonce, publicClient, routerAddress]);
+    }, [account, nonce, pairLimit, publicClient, routerAddress]);
 
-    return { pools, factoryAddress, isLoading, error, refetch: () => setNonce((value) => value + 1) };
+    return { pools, factoryAddress, totalPairs, isLoading, error, refetch: () => setNonce((value) => value + 1) };
 }

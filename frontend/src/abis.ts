@@ -89,6 +89,19 @@ export const routerAbi = [
     },
     {
         type: "function",
+        name: "swapTokensForExactTokens",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "amountOut", type: "uint256" },
+            { name: "amountInMax", type: "uint256" },
+            { name: "path", type: "address[]" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [{ name: "amounts", type: "uint256[]" }],
+    },
+    {
+        type: "function",
         name: "addLiquidity",
         stateMutability: "nonpayable",
         inputs: [
@@ -109,6 +122,24 @@ export const routerAbi = [
     },
     {
         type: "function",
+        name: "addLiquidityETH",
+        stateMutability: "payable",
+        inputs: [
+            { name: "token", type: "address" },
+            { name: "amountTokenDesired", type: "uint256" },
+            { name: "amountTokenMin", type: "uint256" },
+            { name: "amountETHMin", type: "uint256" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [
+            { name: "amountToken", type: "uint256" },
+            { name: "amountETH", type: "uint256" },
+            { name: "liquidity", type: "uint256" },
+        ],
+    },
+    {
+        type: "function",
         name: "removeLiquidity",
         stateMutability: "nonpayable",
         inputs: [
@@ -124,6 +155,83 @@ export const routerAbi = [
             { name: "amountA", type: "uint256" },
             { name: "amountB", type: "uint256" },
         ],
+    },
+    {
+        type: "function",
+        name: "removeLiquidityETH",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "token", type: "address" },
+            { name: "liquidity", type: "uint256" },
+            { name: "amountTokenMin", type: "uint256" },
+            { name: "amountETHMin", type: "uint256" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [
+            { name: "amountToken", type: "uint256" },
+            { name: "amountETH", type: "uint256" },
+        ],
+    },
+    {
+        type: "function",
+        name: "getAmountsIn",
+        stateMutability: "view",
+        inputs: [
+            { name: "amountOut", type: "uint256" },
+            { name: "path", type: "address[]" },
+        ],
+        outputs: [{ name: "amounts", type: "uint256[]" }],
+    },
+    {
+        type: "function",
+        name: "swapExactETHForTokens",
+        stateMutability: "payable",
+        inputs: [
+            { name: "amountOutMin", type: "uint256" },
+            { name: "path", type: "address[]" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [{ name: "amounts", type: "uint256[]" }],
+    },
+    {
+        type: "function",
+        name: "swapETHForExactTokens",
+        stateMutability: "payable",
+        inputs: [
+            { name: "amountOut", type: "uint256" },
+            { name: "path", type: "address[]" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [{ name: "amounts", type: "uint256[]" }],
+    },
+    {
+        type: "function",
+        name: "swapTokensForExactETH",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "amountOut", type: "uint256" },
+            { name: "amountInMax", type: "uint256" },
+            { name: "path", type: "address[]" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [{ name: "amounts", type: "uint256[]" }],
+    },
+    {
+        type: "function",
+        name: "swapExactTokensForETH",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "amountIn", type: "uint256" },
+            { name: "amountOutMin", type: "uint256" },
+            { name: "path", type: "address[]" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [{ name: "amounts", type: "uint256[]" }],
     },
 ] as const;
 

@@ -1,7 +1,7 @@
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useEffect, useMemo, useState } from "react";
 import { type Address, formatUnits, isAddress, parseUnits } from "viem";
-import { useAccount, usePublicClient, useWriteContract } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 
 import { routerAbi } from "../abis";
 import { useApproval } from "../hooks/useApproval";
@@ -9,8 +9,11 @@ import { useDeploymentConfig } from "../hooks/useDeploymentConfig";
 import { useLiquidityPair } from "../hooks/useLiquidityPair";
 import { useToken } from "../hooks/useToken";
 import { useTokenList } from "../hooks/useTokenList";
+import { useTransactionHistory } from "../hooks/useTransactionHistory";
+import { sanitizeAmountInput } from "../lib/amountInput";
 import { normalizeTransactionError } from "../lib/errors";
 import { compactAddress, formatTokenAmount } from "../lib/format";
+import { getWethAddress, isNativeAddress, NATIVE_ETH_ADDRESS } from "../lib/tokenRegistry";
 import {
     DEFAULT_DEADLINE_MINUTES,
     DEFAULT_ROUTER_ADDRESS,
@@ -26,6 +29,7 @@ import {
 } from "../lib/tradeConfig";
 import type { TokenInfo, TransactionState } from "../types";
 import { SwapActionButton } from "./swap/SwapActionButton";
+import { SwapHistory } from "./SwapHistory";
 import { SwapSettingsDialog } from "./swap/SwapSettingsDialog";
 import { TokenAmountPanel } from "./swap/TokenAmountPanel";
 import { TokenSelectorDialog } from "./swap/TokenSelectorDialog";
@@ -112,21 +116,48 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     const [deadlineMinutes, setDeadlineMinutes] = useState(() => sanitizeDeadlineMinutes(Number(loadStorage(STORAGE_KEYS.deadlineMinutes, String(DEFAULT_DEADLINE_MINUTES)))));
     const [tx, setTx] = useState<TransactionState>({ title: "", status: "idle" });
     const [isConfirming, setIsConfirming] = useState(false);
+    const { entries: historyEntries, addEntry: addHistoryEntry, clearHistory } = useTransactionHistory();
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [tokenDialog, setTokenDialog] = useState<"tokenA" | "tokenB" | null>(null);
+    const [removeByTokenAmount, setRemoveByTokenAmount] = useState(false);
+    const [removeAmountA, setRemoveAmountA] = useState("");
+    const [removeAmountB, setRemoveAmountB] = useState("");
+    const [lastEditedRemove, setLastEditedRemove] = useState<"removeA" | "removeB" | null>(null);
 
+    const chainId = useChainId();
     const deployment = useDeploymentConfig();
-    const tokenList = useTokenList({ deployment: deployment.deployment, extraAddresses: [tokenAAddress, tokenBAddress] });
+    const tokenList = useTokenList({ deployment: deployment.deployment });
+    const wethAddress = deployment.deployment?.weth ?? getWethAddress(chainId);
 
     const tokenA = useToken(tokenAAddress, routerAddress);
     const tokenB = useToken(tokenBAddress, routerAddress);
-    const pair = useLiquidityPair({ routerAddress, tokenA: tokenA.token, tokenB: tokenB.token });
+    const pair = useLiquidityPair({ routerAddress, tokenA: tokenA.token, tokenB: tokenB.token, wethAddress });
     const lpToken = useToken(pair.pairAddress ?? "", routerAddress);
 
     const hasValidRouter = isAddress(routerAddress);
-    const hasValidTokenAAddress = isAddress(tokenAAddress);
-    const hasValidTokenBAddress = isAddress(tokenBAddress);
-    const routeSetupComplete = Boolean(hasValidRouter && hasValidTokenAAddress && hasValidTokenBAddress && tokenA.token && tokenB.token);
+    const tokenAIsNative = isNativeAddress(tokenAAddress);
+    const tokenBIsNative = isNativeAddress(tokenBAddress);
+    const hasValidTokenAAddress = isAddress(tokenAAddress) || tokenAIsNative;
+    const hasValidTokenBAddress = isAddress(tokenBAddress) || tokenBIsNative;
+    const hasNativePairWeth = !(tokenAIsNative || tokenBIsNative) || Boolean(wethAddress);
+    const hasOneNativeSide = tokenAIsNative !== tokenBIsNative;
+    const routeSetupComplete = Boolean(hasValidRouter && hasValidTokenAAddress && hasValidTokenBAddress && hasNativePairWeth && !(tokenAIsNative && tokenBIsNative) && tokenA.token && tokenB.token);
+
+    // Clear selected tokens when chain changes and token is not supported
+    useEffect(() => {
+        if (!chainId || deployment.isLoading) return;
+        const isNative = (addr: string) => isNativeAddress(addr);
+        const hasToken = (addr: string) => isNative(addr) || (tokenList.tokens ?? []).some(
+            (t) => t.address && t.address.toLowerCase() === addr.toLowerCase(),
+        );
+
+        if (tokenAAddress && !hasToken(tokenAAddress)) {
+            updateTokenA("");
+        }
+        if (tokenBAddress && !hasToken(tokenBAddress)) {
+            updateTokenB("");
+        }
+    }, [chainId, deployment.isLoading, tokenList.tokens, tokenAAddress, tokenBAddress]);
     const networkLabel = chain?.name ?? "EVM";
     const isBusy = isApproving || isWritePending || isConfirming;
 
@@ -138,24 +169,61 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     const hasInsufficientTokenA = Boolean(amountAValue !== undefined && tokenA.balance !== undefined && tokenA.balance < amountAValue);
     const hasInsufficientTokenB = Boolean(amountBValue !== undefined && tokenB.balance !== undefined && tokenB.balance < amountBValue);
     const hasInsufficientAddBalance = hasInsufficientTokenA || hasInsufficientTokenB;
+    const tokenAAllowanceFailed = tokenA.error && amountAValue !== undefined;
+    const tokenBAllowanceFailed = tokenB.error && amountBValue !== undefined;
     const needsTokenAApproval = Boolean(amountAValue !== undefined && tokenA.allowance !== undefined && tokenA.allowance < amountAValue);
     const needsTokenBApproval = Boolean(amountBValue !== undefined && tokenB.allowance !== undefined && tokenB.allowance < amountBValue);
 
-    const expectedTokenA = useMemo(() => {
-        if (!lpAmountValue || !pair.reserveA || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
-        return (lpAmountValue * pair.reserveA) / pair.totalSupply;
-    }, [lpAmountValue, pair.reserveA, pair.totalSupply]);
-
-    const expectedTokenB = useMemo(() => {
-        if (!lpAmountValue || !pair.reserveB || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
-        return (lpAmountValue * pair.reserveB) / pair.totalSupply;
-    }, [lpAmountValue, pair.reserveB, pair.totalSupply]);
-
-    const hasInsufficientLpBalance = Boolean(lpAmountValue !== undefined && lpToken.balance !== undefined && lpToken.balance < lpAmountValue);
-    const needsLpApproval = Boolean(lpAmountValue !== undefined && lpToken.allowance !== undefined && lpToken.allowance < lpAmountValue);
     const pairLabel = tokenPairLabel(tokenA.token, tokenB.token);
     const hasHighSlippage = slippageBps > 5_000;
     const hasExistingPool = Boolean(pair.pairAddress && pair.reserveA !== undefined && pair.reserveB !== undefined && pair.totalSupply !== undefined && pair.totalSupply > 0n);
+
+    const removeAmountAValue = tokenA.token ? parseTokenAmount(removeAmountA, tokenA.token.decimals) : undefined;
+    const removeAmountBValue = tokenB.token ? parseTokenAmount(removeAmountB, tokenB.token.decimals) : undefined;
+
+    const computedLpFromRemoveA = removeAmountAValue && pair.totalSupply && pair.reserveA && pair.reserveA > 0n
+        ? (removeAmountAValue * pair.totalSupply) / pair.reserveA
+        : undefined;
+    const computedLpFromRemoveB = removeAmountBValue && pair.totalSupply && pair.reserveB && pair.reserveB > 0n
+        ? (removeAmountBValue * pair.totalSupply) / pair.reserveB
+        : undefined;
+
+    const effectiveLpValue = removeByTokenAmount
+        ? (lastEditedRemove === "removeA" ? computedLpFromRemoveA : computedLpFromRemoveB)
+        : lpAmountValue;
+
+    const expectedTokenA = useMemo(() => {
+        if (!effectiveLpValue || !pair.reserveA || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
+        return (effectiveLpValue * pair.reserveA) / pair.totalSupply;
+    }, [effectiveLpValue, pair.reserveA, pair.totalSupply]);
+
+    const expectedTokenB = useMemo(() => {
+        if (!effectiveLpValue || !pair.reserveB || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
+        return (effectiveLpValue * pair.reserveB) / pair.totalSupply;
+    }, [effectiveLpValue, pair.reserveB, pair.totalSupply]);
+
+    // Auto-calculate the other token amount in remove-by-token mode
+    useEffect(() => {
+        if (!tokenA.token || !tokenB.token || !hasExistingPool || !removeByTokenAmount) return;
+        const rA = pair.reserveA;
+        const rB = pair.reserveB;
+        if (rA === undefined || rB === undefined) return;
+
+        if (lastEditedRemove === "removeA" && removeAmountAValue && rA > 0n) {
+            const nextB = (removeAmountAValue * rB) / rA;
+            const nextValue = formatUnits(nextB, tokenB.token.decimals);
+            if (removeAmountB !== nextValue) setRemoveAmountB(nextValue);
+        }
+
+        if (lastEditedRemove === "removeB" && removeAmountBValue && rB > 0n) {
+            const nextA = (removeAmountBValue * rA) / rB;
+            const nextValue = formatUnits(nextA, tokenA.token.decimals);
+            if (removeAmountA !== nextValue) setRemoveAmountA(nextValue);
+        }
+    }, [lastEditedRemove, removeAmountAValue, removeAmountBValue, hasExistingPool, pair.reserveA, pair.reserveB, tokenA.token, tokenB.token, removeByTokenAmount, removeAmountA, removeAmountB]);
+
+    const hasInsufficientLpBalance = Boolean(effectiveLpValue !== undefined && lpToken.balance !== undefined && lpToken.balance < effectiveLpValue);
+    const needsLpApproval = Boolean(effectiveLpValue !== undefined && lpToken.allowance !== undefined && lpToken.allowance < effectiveLpValue);
 
     useEffect(() => {
         if (!tokenA.token || !tokenB.token || !hasExistingPool) return;
@@ -188,6 +256,8 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
             amountAValue !== undefined &&
             amountBValue !== undefined &&
             !hasInsufficientAddBalance &&
+            !tokenAAllowanceFailed &&
+            !tokenBAllowanceFailed &&
             !isBusy,
     );
 
@@ -196,7 +266,7 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
             publicClient &&
             routeSetupComplete &&
             pair.pairAddress &&
-            lpAmountValue !== undefined &&
+            effectiveLpValue !== undefined &&
             !hasInsufficientLpBalance &&
             !pair.error &&
             !pair.isLoading &&
@@ -222,13 +292,28 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         if (pair.isLoading) return "Finding pool";
         if (pair.error) return "Pool unavailable";
         if (!pair.pairAddress) return "Pool not found";
-        if (!lpAmountValue) return "Enter LP amount";
+        if (removeByTokenAmount) {
+            if (!removeAmountAValue && !removeAmountBValue) return "Enter token amounts";
+        } else {
+            if (!lpAmountValue) return "Enter LP amount";
+        }
         if (hasInsufficientLpBalance) return "Insufficient LP balance";
         if (needsLpApproval) return "Approve LP";
         return "Remove liquidity";
-    }, [hasAddAmounts, hasInsufficientAddBalance, hasInsufficientLpBalance, isApproving, isConfirming, isConnected, isWritePending, lpAmountValue, mode, needsLpApproval, needsTokenAApproval, needsTokenBApproval, pair.error, pair.isLoading, pair.pairAddress, publicClient, routeSetupComplete, tokenA.token, tokenB.token, tx.hash, tx.status]);
+    }, [hasAddAmounts, hasInsufficientAddBalance, hasInsufficientLpBalance, isApproving, isConfirming, isConnected, isWritePending, lpAmountValue, mode, needsLpApproval, needsTokenAApproval, needsTokenBApproval, pair.error, pair.isLoading, pair.pairAddress, publicClient, removeAmountAValue, removeAmountBValue, removeByTokenAmount, routeSetupComplete, tokenA.token, tokenB.token, tx.hash, tx.status]);
 
     const isActionDisabled = isConnected ? (mode === "add" ? !canAdd : !canRemove) : !openConnectModal || isBusy;
+    const liquidityInlineError = tokenAAllowanceFailed || tokenBAllowanceFailed
+        ? "Token metadata could not be loaded. Check RPC connection and token addresses."
+        : !hasNativePairWeth
+          ? "Native ETH liquidity requires a configured WETH address for this network."
+          : tokenAIsNative && tokenBIsNative
+            ? "Select one native token side and one ERC20 token side."
+            : pair.error
+              ? "Pool data could not be loaded. Check router, tokens, and network."
+              : hasHighSlippage
+                ? "Slippage is very high. Review settings before continuing."
+                : undefined;
     const estimatedLp = useMemo(() => {
         if (amountAValue === undefined || amountBValue === undefined) return undefined;
 
@@ -332,15 +417,26 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + deadlineMinutes * 60);
             setTx({ title: "Add liquidity pending", status: "pending", message: "Confirm the transaction in your wallet" });
-            const hash = await writeContractAsync({
-                address: routerAddress as Address,
-                abi: routerAbi,
-                functionName: "addLiquidity",
-                args: [tokenA.token.address, tokenB.token.address, amountAValue, amountBValue, applySlippage(amountAValue, slippageBps), applySlippage(amountBValue, slippageBps), account, deadline],
-            });
+            const hash = hasOneNativeSide
+                ? await writeContractAsync({
+                      address: routerAddress as Address,
+                      abi: routerAbi,
+                      functionName: "addLiquidityETH",
+                      args: tokenAIsNative
+                          ? [tokenB.token.address, amountBValue, applySlippage(amountBValue, slippageBps), applySlippage(amountAValue, slippageBps), account, deadline]
+                          : [tokenA.token.address, amountAValue, applySlippage(amountAValue, slippageBps), applySlippage(amountBValue, slippageBps), account, deadline],
+                      value: tokenAIsNative ? amountAValue : amountBValue,
+                  })
+                : await writeContractAsync({
+                      address: routerAddress as Address,
+                      abi: routerAbi,
+                      functionName: "addLiquidity",
+                      args: [tokenA.token.address, tokenB.token.address, amountAValue, amountBValue, applySlippage(amountAValue, slippageBps), applySlippage(amountBValue, slippageBps), account, deadline],
+                  });
             setTx({ title: "Add liquidity submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
             const receipt = await publicClient.waitForTransactionReceipt({ hash });
             if (receipt.status !== "success") throw new Error("Add liquidity transaction reverted");
+            addHistoryEntry({ hash, type: "addLiquidity", timestamp: Date.now(), label: pairLabel });
             tokenA.refetch();
             tokenB.refetch();
             pair.refetch();
@@ -354,7 +450,7 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     }
 
     async function submitRemove() {
-        if (!account || !publicClient || !hasValidRouter || !tokenA.token || !tokenB.token || !pair.pairAddress || lpAmountValue === undefined) return;
+        if (!account || !publicClient || !hasValidRouter || !tokenA.token || !tokenB.token || !pair.pairAddress || effectiveLpValue === undefined) return;
 
         const minTokenA = expectedTokenA === undefined ? 0n : applySlippage(expectedTokenA, slippageBps);
         const minTokenB = expectedTokenB === undefined ? 0n : applySlippage(expectedTokenB, slippageBps);
@@ -363,7 +459,7 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         try {
             if (needsLpApproval) {
                 setTx({ title: "Approve pending", status: "pending", message: "Approving LP tokens" });
-                const hash = await approve(pair.pairAddress, routerAddress as Address, lpAmountValue);
+                const hash = await approve(pair.pairAddress, routerAddress as Address, effectiveLpValue);
                 setTx({ title: "Approve submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 if (receipt.status !== "success") throw new Error("Approval transaction reverted");
@@ -374,15 +470,25 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + deadlineMinutes * 60);
             setTx({ title: "Remove liquidity pending", status: "pending", message: "Confirm the transaction in your wallet" });
-            const hash = await writeContractAsync({
-                address: routerAddress as Address,
-                abi: routerAbi,
-                functionName: "removeLiquidity",
-                args: [tokenA.token.address, tokenB.token.address, lpAmountValue, minTokenA, minTokenB, account, deadline],
-            });
+            const hash = hasOneNativeSide
+                ? await writeContractAsync({
+                      address: routerAddress as Address,
+                      abi: routerAbi,
+                      functionName: "removeLiquidityETH",
+                      args: tokenAIsNative
+                          ? [tokenB.token.address, effectiveLpValue, minTokenB, minTokenA, account, deadline]
+                          : [tokenA.token.address, effectiveLpValue, minTokenA, minTokenB, account, deadline],
+                  })
+                : await writeContractAsync({
+                      address: routerAddress as Address,
+                      abi: routerAbi,
+                      functionName: "removeLiquidity",
+                      args: [tokenA.token.address, tokenB.token.address, effectiveLpValue, minTokenA, minTokenB, account, deadline],
+                  });
             setTx({ title: "Remove liquidity submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
             const receipt = await publicClient.waitForTransactionReceipt({ hash });
             if (receipt.status !== "success") throw new Error("Remove liquidity transaction reverted");
+            addHistoryEntry({ hash, type: "removeLiquidity", timestamp: Date.now(), label: pairLabel });
             tokenA.refetch();
             tokenB.refetch();
             pair.refetch();
@@ -446,6 +552,26 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
                     </button>
                 </div>
 
+                {mode === "remove" && hasExistingPool ? (
+                    <div className="mb-3 flex items-center justify-between px-1">
+                        <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
+                            <input
+                                type="checkbox"
+                                checked={removeByTokenAmount}
+                                onChange={(e) => {
+                                    setRemoveByTokenAmount(e.target.checked);
+                                    if (!e.target.checked) {
+                                        setRemoveAmountA("");
+                                        setRemoveAmountB("");
+                                    }
+                                }}
+                                className="h-4 w-4 rounded border-white/20 bg-white/[0.06] text-pink-500 focus:ring-pink-300"
+                            />
+                            Remove by token amount
+                        </label>
+                    </div>
+                ) : null}
+
                 {mode === "add" ? (
                     <div className="grid min-w-0 max-w-full gap-1">
                         <TokenAmountPanel
@@ -472,6 +598,38 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
                         />
                         {hasExistingPool ? (
                             <p className="px-2 pt-2 text-xs text-slate-500">Amounts auto-follow the current reserve ratio. Edit either side to recalculate the other.</p>
+                        ) : null}
+                    </div>
+                ) : removeByTokenAmount ? (
+                    <div className="grid min-w-0 max-w-full gap-1">
+                        <TokenAmountPanel
+                            label={tokenA.token?.symbol ?? "Token A"}
+                            amount={removeAmountA}
+                            token={tokenA.token}
+                            balance={undefined}
+                            showMax={false}
+                            tokenTone="pay"
+                            onAmountChange={(value) => {
+                                setLastEditedRemove("removeA");
+                                setRemoveAmountA(value);
+                            }}
+                            onTokenClick={() => {}}
+                        />
+                        <TokenAmountPanel
+                            label={tokenB.token?.symbol ?? "Token B"}
+                            amount={removeAmountB}
+                            token={tokenB.token}
+                            balance={undefined}
+                            showMax={false}
+                            tokenTone="receive"
+                            onAmountChange={(value) => {
+                                setLastEditedRemove("removeB");
+                                setRemoveAmountB(value);
+                            }}
+                            onTokenClick={() => {}}
+                        />
+                        {hasExistingPool ? (
+                            <p className="px-2 pt-2 text-xs text-slate-500">Enter the amount of one token; the other will auto-calculate at the current ratio.</p>
                         ) : null}
                     </div>
                 ) : (
@@ -507,10 +665,10 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
                                 value={lpAmount}
                                 type="text"
                                 inputMode="decimal"
-                                onChange={(event) => setLpAmount(event.target.value)}
+                                onChange={(event) => setLpAmount(sanitizeAmountInput(event.target.value, 18))}
                                 placeholder="0"
                                 aria-label="LP tokens"
-                                className="min-w-0 w-0 flex-1 bg-transparent text-4xl font-black leading-none tracking-tight text-white outline-none placeholder:text-slate-700 sm:text-5xl"
+                                className="min-w-0 w-0 flex-1 bg-transparent text-2xl leading-none tracking-tight text-white outline-none placeholder:text-slate-700 sm:text-3xl"
                             />
                             <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.07] px-3 py-2 text-sm font-black text-white">UNI-V2</span>
                         </div>
@@ -532,6 +690,9 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
                             <>
                                 <DetailRow label="Receive A" value={`${formatTokenAmount(expectedTokenA, tokenA.token?.decimals ?? 18)} ${tokenA.token?.symbol ?? ""}`} />
                                 <DetailRow label="Receive B" value={`${formatTokenAmount(expectedTokenB, tokenB.token?.decimals ?? 18)} ${tokenB.token?.symbol ?? ""}`} />
+                                {removeByTokenAmount && effectiveLpValue !== undefined ? (
+                                    <DetailRow label="LP to burn" value={`${formatTokenAmount(effectiveLpValue, 18)} UNI-V2`} />
+                                ) : null}
                             </>
                         )}
                     </dl>
@@ -550,9 +711,9 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
                     </div>
                 </div>
 
-                {pair.error || hasHighSlippage ? (
+                {liquidityInlineError ? (
                     <p role="alert" className="mt-3 rounded-[1.25rem] border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
-                        {pair.error ? "Pool data could not be loaded. Check router, tokens, and network." : "Slippage is very high. Review settings before continuing."}
+                        {liquidityInlineError}
                     </p>
                 ) : null}
 
@@ -564,7 +725,6 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
             <SwapSettingsDialog
                 open={isSettingsOpen}
                 title="Liquidity settings"
-                routeTitle="Pool configuration"
                 tokenInLabel="Token A address"
                 tokenOutLabel="Token B address"
                 routerAddress={routerAddress}
@@ -612,6 +772,8 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
             />
 
             <TransactionToast tx={tx} />
+
+            <SwapHistory entries={historyEntries} onClear={clearHistory} />
         </>
     );
 }

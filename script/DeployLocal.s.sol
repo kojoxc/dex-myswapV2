@@ -37,5 +37,38 @@ contract DeployLocalScript is Script {
         console2.log("TokenB:", address(tokenB));
         console2.log("InitialHolder:", initialHolder);
         console2.log("InitialSupply:", initialSupply);
+
+        _writeDeployment(address(factory), address(weth), address(router), address(tokenA), address(tokenB));
+    }
+
+    function _writeDeployment(address factory, address weth, address router, address tokenA, address tokenB) private {
+        string memory chainId = vm.toString(block.chainid);
+        string memory json = string.concat(
+            "{\n",
+            "  \"chainId\": ",
+            chainId,
+            ",\n",
+            "  \"factory\": \"",
+            vm.toString(factory),
+            "\",\n",
+            "  \"router\": \"",
+            vm.toString(router),
+            "\",\n",
+            "  \"weth\": \"",
+            vm.toString(weth),
+            "\",\n",
+            "  \"tokens\": [\n",
+            "    { \"address\": \"",
+            vm.toString(tokenA),
+            "\", \"symbol\": \"TKNA\", \"name\": \"Token A\", \"decimals\": 18 },\n",
+            "    { \"address\": \"",
+            vm.toString(tokenB),
+            "\", \"symbol\": \"TKNB\", \"name\": \"Token B\", \"decimals\": 18 }\n",
+            "  ]\n",
+            "}\n"
+        );
+        string memory root = vm.projectRoot();
+        vm.writeFile(string.concat(root, "/deployments/", chainId, ".json"), json);
+        vm.writeFile(string.concat(root, "/frontend/public/deployments/", chainId, ".json"), json);
     }
 }

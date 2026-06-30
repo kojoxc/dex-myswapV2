@@ -23,5 +23,31 @@ contract DeployCoreScript is Script {
         console2.log("WETH:", address(weth));
         console2.log("Router:", address(router));
         console2.log("FeeToSetter:", feeToSetter);
+
+        _writeDeployment(address(factory), address(weth), address(router));
+    }
+
+    function _writeDeployment(address factory, address weth, address router) private {
+        string memory chainId = vm.toString(block.chainid);
+        string memory json = string.concat(
+            "{\n",
+            "  \"chainId\": ",
+            chainId,
+            ",\n",
+            "  \"factory\": \"",
+            vm.toString(factory),
+            "\",\n",
+            "  \"router\": \"",
+            vm.toString(router),
+            "\",\n",
+            "  \"weth\": \"",
+            vm.toString(weth),
+            "\",\n",
+            "  \"tokens\": []\n",
+            "}\n"
+        );
+        string memory root = vm.projectRoot();
+        vm.writeFile(string.concat(root, "/deployments/", chainId, ".json"), json);
+        vm.writeFile(string.concat(root, "/frontend/public/deployments/", chainId, ".json"), json);
     }
 }

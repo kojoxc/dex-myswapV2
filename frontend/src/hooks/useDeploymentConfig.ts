@@ -6,6 +6,7 @@ type DeploymentToken = {
     address: string;
     symbol?: string;
     name?: string;
+    decimals?: number;
 };
 
 export type DeploymentConfig = {
@@ -31,7 +32,7 @@ function toAddress(value?: string) {
 export function useDeploymentConfig() {
     const chainId = useChainId();
     const [deployment, setDeployment] = useState<DeploymentConfig>();
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string>();
 
     useEffect(() => {

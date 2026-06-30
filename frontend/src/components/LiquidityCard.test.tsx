@@ -13,6 +13,8 @@ const TOKEN_A = "0x0000000000000000000000000000000000002000" as Address;
 const TOKEN_B = "0x0000000000000000000000000000000000003000" as Address;
 const PAIR = "0x0000000000000000000000000000000000004000" as Address;
 const ACCOUNT = "0x0000000000000000000000000000000000005000" as Address;
+const WETH = "0x0000000000000000000000000000000000006000" as Address;
+const NATIVE_ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as Address;
 const HASH = "0x0000000000000000000000000000000000000000000000000000000000009999" as `0x${string}`;
 
 type MockTokenResult = {
@@ -47,6 +49,12 @@ type MockState = {
     isWritePending: boolean;
     tokenResults: Record<string, MockTokenResult>;
     pairResult: MockPairResult;
+    deployment?: {
+        chainId: number;
+        router?: Address;
+        weth?: Address;
+        tokens: { address: Address; symbol?: string; name?: string }[];
+    };
 };
 
 const mock = vi.hoisted(() => ({
@@ -78,15 +86,25 @@ vi.mock("wagmi", () => ({
 }));
 
 vi.mock("../hooks/useDeploymentConfig", () => ({
-    useDeploymentConfig: () => ({ deployment: undefined, isLoading: false }),
+    useDeploymentConfig: () => ({ deployment: mock.state.deployment, isLoading: false }),
 }));
 
 vi.mock("../hooks/useTokenList", () => ({
-    useTokenList: () => ({ tokens: [], isLoading: false }),
+    useTokenList: () => ({
+        tokens: [
+            { type: "erc20", chainId: 31337, address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 },
+        ],
+        isLoading: false,
+    }),
 }));
 
 vi.mock("../hooks/useApproval", () => ({
     useApproval: () => ({ approve: mock.state.approve, isApproving: mock.state.isApproving }),
+}));
+
+vi.mock("../hooks/useTransactionHistory", () => ({
+    useTransactionHistory: () => ({ entries: [], addEntry: vi.fn(), clearHistory: vi.fn() }),
 }));
 
 vi.mock("../hooks/useLiquidityPair", () => ({
@@ -104,6 +122,7 @@ vi.mock("../hooks/useToken", () => ({
 const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 };
 const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 };
 const lpToken: TokenInfo = { address: PAIR, name: "Uniswap V2", symbol: "UNI-V2", decimals: 18 };
+const nativeEth: TokenInfo = { address: NATIVE_ETH, name: "Ethereum", symbol: "ETH", decimals: 18 };
 
 function units(value: string) {
     return parseAmount(value, 18);
@@ -135,6 +154,7 @@ function createState(overrides: Partial<MockState> = {}): MockState {
             [TOKEN_A.toLowerCase()]: tokenResult(tokenA),
             [TOKEN_B.toLowerCase()]: tokenResult(tokenB),
             [PAIR.toLowerCase()]: tokenResult(lpToken),
+            [NATIVE_ETH.toLowerCase()]: tokenResult(nativeEth, { allowance: undefined }),
         },
         pairResult: {
             pairAddress: PAIR,
@@ -189,6 +209,25 @@ describe("LiquidityCard", () => {
         expect(mock.state.writeContractAsync).toHaveBeenCalledWith(expect.objectContaining({ functionName: "addLiquidity" }));
     });
 
+    it("submits native ETH add liquidity with addLiquidityETH", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem("myswap:v2:router", ROUTER);
+        localStorage.setItem("myswap:v2:tokenIn", NATIVE_ETH);
+        localStorage.setItem("myswap:v2:tokenOut", TOKEN_B);
+        mock.state = createState({ deployment: { chainId: 31337, router: ROUTER, weth: WETH, tokens: [] } });
+
+        render(<LiquidityCard />);
+
+        await user.type(screen.getByLabelText("Token A"), "1");
+        await waitFor(() => expect(screen.getByLabelText("Token B")).toHaveValue("2"));
+        await user.click(screen.getByRole("button", { name: "Add liquidity" }));
+
+        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
+        const request = mock.state.writeContractAsync.mock.calls[0][0];
+        expect(request).toEqual(expect.objectContaining({ functionName: "addLiquidityETH", value: units("1") }));
+        expect(request.args[0]).toBe(TOKEN_B);
+    });
+
     it("submits token approval before adding liquidity", async () => {
         const user = userEvent.setup();
         renderConfigured({
@@ -217,6 +256,35 @@ describe("LiquidityCard", () => {
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
         expect(mock.state.writeContractAsync).toHaveBeenCalledWith(expect.objectContaining({ functionName: "removeLiquidity" }));
+    });
+
+    it("filters non-numeric LP amount characters", async () => {
+        const user = userEvent.setup();
+        renderConfigured();
+
+        await user.click(screen.getByRole("button", { name: "Remove" }));
+        const input = screen.getByLabelText("LP tokens");
+        await user.type(input, "1x.2.3e");
+
+        expect(input).toHaveValue("1.23");
+    });
+
+    it("submits native ETH remove liquidity with removeLiquidityETH", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem("myswap:v2:router", ROUTER);
+        localStorage.setItem("myswap:v2:tokenIn", NATIVE_ETH);
+        localStorage.setItem("myswap:v2:tokenOut", TOKEN_B);
+        mock.state = createState({ deployment: { chainId: 31337, router: ROUTER, weth: WETH, tokens: [] } });
+
+        render(<LiquidityCard defaultMode="remove" />);
+
+        await user.type(screen.getByLabelText("LP tokens"), "1");
+        await user.click(screen.getByRole("button", { name: "Remove liquidity" }));
+
+        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
+        const request = mock.state.writeContractAsync.mock.calls[0][0];
+        expect(request).toEqual(expect.objectContaining({ functionName: "removeLiquidityETH" }));
+        expect(request.args[0]).toBe(TOKEN_B);
     });
 
     it("disables remove liquidity when the pool does not exist", async () => {

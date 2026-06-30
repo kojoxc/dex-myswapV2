@@ -3,6 +3,7 @@ import { type Address, isAddress } from "viem";
 import { useAccount, usePublicClient } from "wagmi";
 
 import { erc20Abi } from "../abis";
+import { NATIVE_ETH_ADDRESS } from "../lib/tokenRegistry";
 import type { TokenInfo } from "../types";
 
 type UseTokenResult = {
@@ -24,10 +25,13 @@ export function useToken(tokenAddress: string, spender?: string): UseTokenResult
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string>();
 
+    const isNative = tokenAddress.toLowerCase() === NATIVE_ETH_ADDRESS.toLowerCase();
+
     const normalizedAddress = useMemo(() => {
+        if (isNative) return NATIVE_ETH_ADDRESS;
         const value = tokenAddress.trim();
         return isAddress(value) ? (value as Address) : undefined;
-    }, [tokenAddress]);
+    }, [tokenAddress, isNative]);
 
     useEffect(() => {
         let cancelled = false;
@@ -46,45 +50,65 @@ export function useToken(tokenAddress: string, spender?: string): UseTokenResult
             setIsLoading(true);
 
             try {
-                const calls = [
-                    publicClient.readContract({ address: normalizedAddress, abi: erc20Abi, functionName: "name" }),
-                    publicClient.readContract({ address: normalizedAddress, abi: erc20Abi, functionName: "symbol" }),
-                    publicClient.readContract({ address: normalizedAddress, abi: erc20Abi, functionName: "decimals" }),
-                ] as const;
+                if (isNative) {
+                    const nativeToken: TokenInfo = {
+                        address: NATIVE_ETH_ADDRESS,
+                        name: "Ethereum",
+                        symbol: "ETH",
+                        decimals: 18,
+                    };
 
-                const [name, symbol, decimals] = await Promise.all(calls);
-                const nextToken = {
-                    address: normalizedAddress,
-                    name,
-                    symbol,
-                    decimals,
-                };
+                    let nextBalance: bigint | undefined;
+                    if (owner) {
+                        nextBalance = await publicClient.getBalance({ address: owner });
+                    }
 
-                let nextBalance: bigint | undefined;
-                let nextAllowance: bigint | undefined;
+                    if (!cancelled) {
+                        setToken(nativeToken);
+                        setBalance(nextBalance);
+                        setAllowance(undefined);
+                    }
+                } else {
+                    const calls = [
+                        publicClient.readContract({ address: normalizedAddress, abi: erc20Abi, functionName: "name" }),
+                        publicClient.readContract({ address: normalizedAddress, abi: erc20Abi, functionName: "symbol" }),
+                        publicClient.readContract({ address: normalizedAddress, abi: erc20Abi, functionName: "decimals" }),
+                    ] as const;
 
-                if (owner) {
-                    nextBalance = await publicClient.readContract({
+                    const [name, symbol, decimals] = await Promise.all(calls);
+                    const nextToken = {
                         address: normalizedAddress,
-                        abi: erc20Abi,
-                        functionName: "balanceOf",
-                        args: [owner],
-                    });
-                }
+                        name,
+                        symbol,
+                        decimals,
+                    };
 
-                if (owner && spender && isAddress(spender)) {
-                    nextAllowance = await publicClient.readContract({
-                        address: normalizedAddress,
-                        abi: erc20Abi,
-                        functionName: "allowance",
-                        args: [owner, spender as Address],
-                    });
-                }
+                    let nextBalance: bigint | undefined;
+                    let nextAllowance: bigint | undefined;
 
-                if (!cancelled) {
-                    setToken(nextToken);
-                    setBalance(nextBalance);
-                    setAllowance(nextAllowance);
+                    if (owner) {
+                        nextBalance = await publicClient.readContract({
+                            address: normalizedAddress,
+                            abi: erc20Abi,
+                            functionName: "balanceOf",
+                            args: [owner],
+                        });
+                    }
+
+                    if (owner && spender && isAddress(spender)) {
+                        nextAllowance = await publicClient.readContract({
+                            address: normalizedAddress,
+                            abi: erc20Abi,
+                            functionName: "allowance",
+                            args: [owner, spender as Address],
+                        });
+                    }
+
+                    if (!cancelled) {
+                        setToken(nextToken);
+                        setBalance(nextBalance);
+                        setAllowance(nextAllowance);
+                    }
                 }
             } catch (caught) {
                 if (!cancelled) {
@@ -100,7 +124,7 @@ export function useToken(tokenAddress: string, spender?: string): UseTokenResult
         return () => {
             cancelled = true;
         };
-    }, [normalizedAddress, owner, publicClient, spender, nonce]);
+    }, [normalizedAddress, owner, publicClient, spender, nonce, isNative]);
 
     return {
         token,

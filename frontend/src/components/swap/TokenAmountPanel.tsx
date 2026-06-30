@@ -1,5 +1,7 @@
 import type { TokenInfo } from "../../types";
+import { sanitizeAmountInput } from "../../lib/amountInput";
 import { formatTokenAmount } from "../../lib/format";
+import { Skeleton } from "../Skeleton";
 
 type TokenAmountPanelProps = {
     label: string;
@@ -47,32 +49,40 @@ export function TokenAmountPanel(props: TokenAmountPanelProps) {
             </div>
 
             <div className="mt-4 flex min-w-0 w-full max-w-full items-center gap-2">
-                <input
-                    id={inputId}
-                    value={props.isLoading ? "..." : props.amount}
-                    type="text"
-                    inputMode="decimal"
-                    readOnly={props.readOnly}
-                    onChange={(event) => props.onAmountChange?.(event.target.value)}
-                    placeholder="0"
-                    aria-label={props.label}
-                    className="min-w-0 w-0 flex-1 bg-transparent text-4xl font-black leading-none tracking-tight text-white outline-none placeholder:text-slate-700 sm:text-5xl"
-                />
+                {props.isLoading ? (
+                    <Skeleton className="h-8 w-40 sm:h-10" />
+                ) : (
+                    <input
+                        id={inputId}
+                        value={props.amount}
+                        type="text"
+                        inputMode="decimal"
+                        readOnly={props.readOnly}
+                        onChange={(event) => props.onAmountChange?.(sanitizeAmountInput(event.target.value, props.token?.decimals))}
+                        placeholder="0"
+                        aria-label={props.label}
+                        className="min-w-0 w-0 flex-1 bg-transparent text-2xl leading-none tracking-tight text-white outline-none placeholder:text-slate-700 sm:text-3xl"
+                    />
+                )}
 
-                <button
-                    type="button"
-                    onClick={props.onTokenClick}
-                    aria-label={`Select ${props.tokenTone === "pay" ? "pay" : "receive"} token`}
-                    className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] py-1.5 pl-1.5 pr-2.5 transition hover:border-pink-300/40 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                >
-                    <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-br ${gradient} text-[0.6rem] font-black text-white`}>
-                        {tokenInitials(props.token)}
-                    </span>
-                    <span className="max-w-[5.5rem] truncate text-sm font-black text-white">{props.token?.symbol ?? "Select"}</span>
-                    <span aria-hidden="true" className="text-slate-500">
-                        v
-                    </span>
-                </button>
+                {props.isLoading && !props.token ? (
+                    <Skeleton className="h-10 w-24" />
+                ) : (
+                    <button
+                        type="button"
+                        onClick={props.onTokenClick}
+                        aria-label={`Select ${props.tokenTone === "pay" ? "pay" : "receive"} token`}
+                        className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] py-1.5 pl-1.5 pr-2.5 transition hover:border-pink-300/40 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                    >
+                        <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-br ${gradient} text-[0.6rem] font-black text-white`}>
+                            {tokenInitials(props.token)}
+                        </span>
+                        <span className="max-w-[5.5rem] truncate text-sm font-black text-white">{props.token?.symbol ?? "Select"}</span>
+                        <span aria-hidden="true" className="text-slate-500">
+                            v
+                        </span>
+                    </button>
+                )}
             </div>
         </section>
     );

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { type Address, isAddress } from "viem";
-import { usePublicClient } from "wagmi";
+import { useChainId, usePublicClient } from "wagmi";
 
 import { erc20Abi, factoryAbi, pairAbi, routerAbi } from "../abis";
+import { getWethAddress, resolveNativeAddress } from "../lib/tokenRegistry";
 import type { TokenInfo } from "../types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -18,8 +19,9 @@ type UseLiquidityPairResult = {
     refetch: () => void;
 };
 
-export function useLiquidityPair(args: { routerAddress: string; tokenA?: TokenInfo; tokenB?: TokenInfo }): UseLiquidityPairResult {
+export function useLiquidityPair(args: { routerAddress: string; tokenA?: TokenInfo; tokenB?: TokenInfo; wethAddress?: Address }): UseLiquidityPairResult {
     const publicClient = usePublicClient();
+    const chainId = useChainId();
     const [nonce, setNonce] = useState(0);
     const [factoryAddress, setFactoryAddress] = useState<Address>();
     const [pairAddress, setPairAddress] = useState<Address>();
@@ -29,8 +31,9 @@ export function useLiquidityPair(args: { routerAddress: string; tokenA?: TokenIn
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string>();
 
-    const tokenAAddress = args.tokenA?.address;
-    const tokenBAddress = args.tokenB?.address;
+    const wethAddress = args.wethAddress ?? getWethAddress(chainId);
+    const tokenAAddress = args.tokenA ? resolveNativeAddress(args.tokenA.address, wethAddress) : undefined;
+    const tokenBAddress = args.tokenB ? resolveNativeAddress(args.tokenB.address, wethAddress) : undefined;
 
     useEffect(() => {
         let cancelled = false;
@@ -43,7 +46,7 @@ export function useLiquidityPair(args: { routerAddress: string; tokenA?: TokenIn
             setTotalSupply(undefined);
             setError(undefined);
 
-            if (!publicClient || !isAddress(args.routerAddress) || !tokenAAddress || !tokenBAddress) {
+            if (!publicClient || !isAddress(args.routerAddress) || !tokenAAddress || !tokenBAddress || tokenAAddress.toLowerCase() === tokenBAddress.toLowerCase()) {
                 setIsLoading(false);
                 return;
             }

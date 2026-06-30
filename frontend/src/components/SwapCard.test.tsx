@@ -12,7 +12,10 @@ const TOKEN_A = "0x0000000000000000000000000000000000002000" as Address;
 const TOKEN_B = "0x0000000000000000000000000000000000003000" as Address;
 const TOKEN_C = "0x0000000000000000000000000000000000004000" as Address;
 const ACCOUNT = "0x0000000000000000000000000000000000005000" as Address;
+const WETH = "0x0000000000000000000000000000000000006000" as Address;
+const NATIVE_ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as Address;
 const HASH = "0x0000000000000000000000000000000000000000000000000000000000009999" as `0x${string}`;
+const QUOTE_UPDATED_AT = 1_700_000_000_000;
 
 type MockTokenResult = {
     token?: TokenInfo;
@@ -37,6 +40,12 @@ type MockState = {
     isSwapPending: boolean;
     tokenResults: Record<string, MockTokenResult>;
     quoteMode: QuoteMode;
+    deployment?: {
+        chainId: number;
+        router?: Address;
+        weth?: Address;
+        tokens: { address: Address; symbol?: string; name?: string }[];
+    };
 };
 
 const mock = vi.hoisted(() => ({
@@ -69,7 +78,7 @@ vi.mock("wagmi", () => ({
 }));
 
 vi.mock("../hooks/useDeploymentConfig", () => ({
-    useDeploymentConfig: () => ({ deployment: undefined, isLoading: false }),
+    useDeploymentConfig: () => ({ deployment: mock.state.deployment, isLoading: false }),
 }));
 
 vi.mock("../hooks/useLiquidityPair", () => ({
@@ -77,11 +86,22 @@ vi.mock("../hooks/useLiquidityPair", () => ({
 }));
 
 vi.mock("../hooks/useTokenList", () => ({
-    useTokenList: () => ({ tokens: [], isLoading: false }),
+    useTokenList: () => ({
+        tokens: [
+            { type: "erc20", chainId: 31337, address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_C, name: "Token C", symbol: "TKNC", decimals: 18 },
+        ],
+        isLoading: false,
+    }),
 }));
 
 vi.mock("../hooks/useApproval", () => ({
     useApproval: () => ({ approve: mock.state.approve, isApproving: mock.state.isApproving }),
+}));
+
+vi.mock("../hooks/useTransactionHistory", () => ({
+    useTransactionHistory: () => ({ entries: [], addEntry: vi.fn(), clearHistory: vi.fn() }),
 }));
 
 vi.mock("../hooks/useToken", () => ({
@@ -93,23 +113,45 @@ vi.mock("../hooks/useToken", () => ({
 }));
 
 vi.mock("../hooks/useSwapQuote", () => ({
-    useSwapQuote: (args: { tokenIn?: TokenInfo; tokenOut?: TokenInfo; amount: string; slippageBps: number }) => {
-        const amountIn = args.tokenIn ? parseAmount(args.amount, args.tokenIn.decimals) : undefined;
-        if (!args.tokenIn || !args.tokenOut || !amountIn) return { amountIn, isLoading: false };
-        if (mock.state.quoteMode === "loading") return { amountIn, isLoading: true };
-        if (mock.state.quoteMode === "error") return { amountIn, isLoading: false, error: "No route" };
-        if (mock.state.quoteMode === "empty") return { amountIn, isLoading: false };
+    useSwapQuote: (args: { tokenIn?: TokenInfo; tokenOut?: TokenInfo; amount: string; slippageBps: number; quoteMode?: "exactIn" | "exactOut" }) => {
+        const quoteMode = args.quoteMode ?? "exactIn";
+        const baseQuote = { routes: [], selectedRouteIndex: 0, setSelectedRouteIndex: vi.fn(), refetch: vi.fn(), updatedAt: QUOTE_UPDATED_AT };
+        const parsedAmount = quoteMode === "exactOut"
+            ? args.tokenOut ? parseAmount(args.amount, args.tokenOut.decimals) : undefined
+            : args.tokenIn ? parseAmount(args.amount, args.tokenIn.decimals) : undefined;
+        if (!args.tokenIn || !args.tokenOut || !parsedAmount) return { ...baseQuote, updatedAt: undefined, isLoading: false };
+        if (mock.state.quoteMode === "loading") {
+            return quoteMode === "exactOut"
+                ? { ...baseQuote, updatedAt: undefined, amountOut: parsedAmount, isLoading: true }
+                : { ...baseQuote, updatedAt: undefined, amountIn: parsedAmount, isLoading: true };
+        }
+        if (mock.state.quoteMode === "error") {
+            return quoteMode === "exactOut"
+                ? { ...baseQuote, updatedAt: undefined, amountOut: parsedAmount, isLoading: false, error: "No route" }
+                : { ...baseQuote, updatedAt: undefined, amountIn: parsedAmount, isLoading: false, error: "No route" };
+        }
+        if (mock.state.quoteMode === "empty") return { ...baseQuote, updatedAt: undefined, isLoading: false };
 
-        const amountOut = amountIn * 2n;
         const slippageBps = BigInt(Math.min(9_900, Math.max(0, Math.round(args.slippageBps))));
+        if (quoteMode === "exactOut") {
+            const amountOut = parsedAmount;
+            const amountIn = amountOut / 2n;
+            const amountInMax = (amountIn * (10_000n + slippageBps) + 9_999n) / 10_000n;
+            return { ...baseQuote, amountIn, amountOut, amountInMax, rate: "2", isLoading: false };
+        }
+
+        const amountIn = parsedAmount;
+        const amountOut = amountIn * 2n;
         const amountOutMin = (amountOut * (10_000n - slippageBps)) / 10_000n;
-        return { amountIn, amountOut, amountOutMin, rate: "2", isLoading: false };
+        return { ...baseQuote, amountIn, amountOut, amountOutMin, rate: "2", isLoading: false };
     },
 }));
 
 const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 };
 const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 };
 const tokenC: TokenInfo = { address: TOKEN_C, name: "Token C", symbol: "TKNC", decimals: 18 };
+const wethToken: TokenInfo = { address: WETH, name: "Wrapped Ether", symbol: "WETH", decimals: 18 };
+const nativeEth: TokenInfo = { address: NATIVE_ETH, name: "Ethereum", symbol: "ETH", decimals: 18 };
 
 function units(value: string) {
     return parseAmount(value, 18) ?? 0n;
@@ -142,6 +184,8 @@ function createState(overrides: Partial<MockState> = {}): MockState {
             [TOKEN_A.toLowerCase()]: tokenResult(tokenA),
             [TOKEN_B.toLowerCase()]: tokenResult(tokenB),
             [TOKEN_C.toLowerCase()]: tokenResult(tokenC),
+            [WETH.toLowerCase()]: tokenResult(wethToken),
+            [NATIVE_ETH.toLowerCase()]: tokenResult(nativeEth, { allowance: undefined }),
         },
         ...overrides,
     };
@@ -186,13 +230,23 @@ describe("SwapCard", () => {
         expect(input).toHaveValue("1.25");
     });
 
+    it("filters non-numeric pay amount characters", async () => {
+        const user = userEvent.setup();
+        renderConfigured();
+
+        const input = screen.getByLabelText("You pay");
+        await user.type(input, "1a2..3e-4");
+
+        expect(input).toHaveValue("12.34");
+    });
+
     it("selects a token through token selector dialog", async () => {
         const user = userEvent.setup();
         renderConfigured();
 
         await user.click(screen.getByRole("button", { name: "Select pay token" }));
         const dialog = screen.getByRole("dialog", { name: "Select pay token" });
-        const input = within(dialog).getByLabelText("Token contract address");
+        const input = within(dialog).getByLabelText("Search by token or address");
 
         await user.clear(input);
         await user.type(input, TOKEN_C);
@@ -245,8 +299,8 @@ describe("SwapCard", () => {
 
         await user.type(screen.getByLabelText("You pay"), "1");
 
-        expect(screen.getByRole("status")).toHaveTextContent("Fetching quote...");
-        expect(screen.getByRole("button", { name: /Fetching quote/ })).toBeDisabled();
+        expect(screen.getByRole("status")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Fetching quote" })).toBeDisabled();
     });
 
     it("shows quote error state", async () => {
@@ -284,6 +338,60 @@ describe("SwapCard", () => {
         await user.click(screen.getByRole("button", { name: "Swap" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
+    });
+
+    it("submits exact-output token swaps with swapTokensForExactTokens", async () => {
+        const user = userEvent.setup();
+        renderConfigured();
+
+        await user.click(screen.getByRole("button", { name: "Exact out" }));
+        await user.type(screen.getByLabelText("You receive"), "2");
+
+        expect(screen.getByLabelText("You pay")).toHaveValue("1");
+
+        await user.click(screen.getByRole("button", { name: "Swap" }));
+
+        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
+        const request = mock.state.writeContractAsync.mock.calls[0][0];
+        expect(request).toEqual(expect.objectContaining({ functionName: "swapTokensForExactTokens" }));
+        expect(request.args[0]).toBe(units("2"));
+        expect(request.args[1]).toBe(units("1.005"));
+    });
+
+    it("submits native ETH input swaps with swapExactETHForTokens", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem("myswap:v2:router", ROUTER);
+        localStorage.setItem("myswap:v2:tokenIn", NATIVE_ETH);
+        localStorage.setItem("myswap:v2:tokenOut", TOKEN_B);
+        mock.state = createState({ deployment: { chainId: 31337, router: ROUTER, weth: WETH, tokens: [] } });
+
+        render(<SwapCard />);
+
+        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.click(screen.getByRole("button", { name: "Swap" }));
+
+        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
+        const request = mock.state.writeContractAsync.mock.calls[0][0];
+        expect(request).toEqual(expect.objectContaining({ functionName: "swapExactETHForTokens", value: units("1") }));
+        expect(request.args[1]).toEqual([WETH, TOKEN_B]);
+    });
+
+    it("submits native ETH output swaps with swapExactTokensForETH", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem("myswap:v2:router", ROUTER);
+        localStorage.setItem("myswap:v2:tokenIn", TOKEN_A);
+        localStorage.setItem("myswap:v2:tokenOut", NATIVE_ETH);
+        mock.state = createState({ deployment: { chainId: 31337, router: ROUTER, weth: WETH, tokens: [] } });
+
+        render(<SwapCard />);
+
+        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.click(screen.getByRole("button", { name: "Swap" }));
+
+        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
+        const request = mock.state.writeContractAsync.mock.calls[0][0];
+        expect(request).toEqual(expect.objectContaining({ functionName: "swapExactTokensForETH" }));
+        expect(request.args[2]).toEqual([TOKEN_A, WETH]);
     });
 
     it("keeps mobile swap page focused without marketing hero", () => {
