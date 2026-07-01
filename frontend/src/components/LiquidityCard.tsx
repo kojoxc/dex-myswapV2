@@ -1,5 +1,6 @@
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { type Address, formatUnits, isAddress, parseUnits } from "viem";
 import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 
@@ -7,12 +8,13 @@ import { routerAbi } from "../abis";
 import { useApproval } from "../hooks/useApproval";
 import { useDeploymentConfig } from "../hooks/useDeploymentConfig";
 import { useLiquidityPair } from "../hooks/useLiquidityPair";
+import { type PoolInfo, usePools } from "../hooks/usePools";
 import { useToken } from "../hooks/useToken";
 import { useTokenList } from "../hooks/useTokenList";
-import { useTransactionHistory } from "../hooks/useTransactionHistory";
+import { useTransactionHistory, type HistoryEntry } from "../hooks/useTransactionHistory";
 import { sanitizeAmountInput } from "../lib/amountInput";
 import { normalizeTransactionError } from "../lib/errors";
-import { compactAddress, formatTokenAmount } from "../lib/format";
+import { compactAddress, formatDisplayAmount, formatTokenAmount } from "../lib/format";
 import { getWethAddress, isNativeAddress, NATIVE_ETH_ADDRESS } from "../lib/tokenRegistry";
 import {
     DEFAULT_DEADLINE_MINUTES,
@@ -29,14 +31,16 @@ import {
 } from "../lib/tradeConfig";
 import type { TokenInfo, TransactionState } from "../types";
 import { SwapActionButton } from "./swap/SwapActionButton";
+import { SwapDirectionButton } from "./swap/SwapDirectionButton";
 import { SwapHistory } from "./SwapHistory";
 import { SwapSettingsDialog } from "./swap/SwapSettingsDialog";
 import { TokenAmountPanel } from "./swap/TokenAmountPanel";
 import { TokenSelectorDialog } from "./swap/TokenSelectorDialog";
+import { TransactionDetails, type TransactionDetailRow } from "./swap/TransactionDetails";
 import { TransactionToast } from "./TransactionToast";
 
-type LiquidityMode = "add" | "remove";
 type LastEditedAmount = "tokenA" | "tokenB" | null;
+type LiquidityMode = "add" | "remove";
 
 function parseTokenAmount(value: string, decimals: number) {
     if (!value.trim()) return undefined;
@@ -52,15 +56,6 @@ function parseTokenAmount(value: string, decimals: number) {
 function tokenPairLabel(tokenA?: TokenInfo, tokenB?: TokenInfo) {
     if (!tokenA || !tokenB) return "Token pair";
     return `${tokenA.symbol} / ${tokenB.symbol}`;
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
-            <dt className="text-slate-500">{label}</dt>
-            <dd className="min-w-0 truncate text-right font-bold text-slate-200">{value}</dd>
-        </div>
-    );
 }
 
 function minBigInt(left: bigint, right: bigint) {
@@ -93,11 +88,33 @@ function quoteLiquidityAmount(input?: bigint, reserveIn?: bigint, reserveOut?: b
     return (input * reserveOut) / reserveIn;
 }
 
+function positionUnderlying(pool: PoolInfo, lpAmount?: bigint) {
+    if (!lpAmount || pool.totalSupply === 0n) return { amountA: undefined, amountB: undefined };
+    return {
+        amountA: (lpAmount * pool.reserveA) / pool.totalSupply,
+        amountB: (lpAmount * pool.reserveB) / pool.totalSupply,
+    };
+}
+
+function formatPositionShare(lpBalance?: bigint, totalSupply?: bigint) {
+    if (!lpBalance || !totalSupply || totalSupply === 0n) return "-";
+    return formatPercentBps((lpBalance * 10_000n) / totalSupply);
+}
+
+function lpAmountClass(displayAmount: string) {
+    const length = displayAmount.length;
+    if (length > 14) return "lp-amount-input amount-long";
+    if (length > 10) return "lp-amount-input amount-medium";
+    return "lp-amount-input";
+}
+
 type LiquidityCardProps = {
     defaultMode?: LiquidityMode;
+    historyEntries?: HistoryEntry[];
+    onAddHistoryEntry?: (entry: HistoryEntry) => void;
 };
 
-export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
+export function LiquidityCard({ defaultMode = "add", historyEntries: extHistoryEntries, onAddHistoryEntry: extAddHistoryEntry }: LiquidityCardProps) {
     const { address: account, chain, isConnected } = useAccount();
     const { openConnectModal } = useConnectModal();
     const publicClient = usePublicClient();
@@ -112,17 +129,18 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     const [amountB, setAmountB] = useState("");
     const [lastEditedAmount, setLastEditedAmount] = useState<LastEditedAmount>(null);
     const [lpAmount, setLpAmount] = useState("");
+    const [isLpAmountFocused, setIsLpAmountFocused] = useState(false);
     const [slippageBps, setSlippageBps] = useState(() => sanitizeSlippageBps(Number(loadStorage(STORAGE_KEYS.slippageBps, String(DEFAULT_SLIPPAGE_BPS)))));
     const [deadlineMinutes, setDeadlineMinutes] = useState(() => sanitizeDeadlineMinutes(Number(loadStorage(STORAGE_KEYS.deadlineMinutes, String(DEFAULT_DEADLINE_MINUTES)))));
     const [tx, setTx] = useState<TransactionState>({ title: "", status: "idle" });
     const [isConfirming, setIsConfirming] = useState(false);
-    const { entries: historyEntries, addEntry: addHistoryEntry, clearHistory } = useTransactionHistory();
+    const internalHistory = useTransactionHistory();
+    const historyEntries = extHistoryEntries ?? internalHistory.entries;
+    const addHistoryEntry = extAddHistoryEntry ?? internalHistory.addEntry;
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [tokenDialog, setTokenDialog] = useState<"tokenA" | "tokenB" | null>(null);
-    const [removeByTokenAmount, setRemoveByTokenAmount] = useState(false);
-    const [removeAmountA, setRemoveAmountA] = useState("");
-    const [removeAmountB, setRemoveAmountB] = useState("");
-    const [lastEditedRemove, setLastEditedRemove] = useState<"removeA" | "removeB" | null>(null);
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [selectedRemovePair, setSelectedRemovePair] = useState<Address>();
 
     const chainId = useChainId();
     const deployment = useDeploymentConfig();
@@ -133,6 +151,15 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     const tokenB = useToken(tokenBAddress, routerAddress);
     const pair = useLiquidityPair({ routerAddress, tokenA: tokenA.token, tokenB: tokenB.token, wethAddress });
     const lpToken = useToken(pair.pairAddress ?? "", routerAddress);
+    const pools = usePools(routerAddress, 50);
+    const removePositions = useMemo(
+        () => pools.pools.filter((pool) => (pool.userLpBalance ?? 0n) > 0n),
+        [pools.pools],
+    );
+    const selectedPosition = useMemo(
+        () => removePositions.find((pool) => pool.pairAddress.toLowerCase() === selectedRemovePair?.toLowerCase()),
+        [removePositions, selectedRemovePair],
+    );
 
     const hasValidRouter = isAddress(routerAddress);
     const tokenAIsNative = isNativeAddress(tokenAAddress);
@@ -158,7 +185,6 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
             updateTokenB("");
         }
     }, [chainId, deployment.isLoading, tokenList.tokens, tokenAAddress, tokenBAddress]);
-    const networkLabel = chain?.name ?? "EVM";
     const isBusy = isApproving || isWritePending || isConfirming;
 
     const amountAValue = tokenA.token ? parseTokenAmount(amountA, tokenA.token.decimals) : undefined;
@@ -175,55 +201,26 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     const needsTokenBApproval = Boolean(amountBValue !== undefined && tokenB.allowance !== undefined && tokenB.allowance < amountBValue);
 
     const pairLabel = tokenPairLabel(tokenA.token, tokenB.token);
+    const lpTokenLabel = pairLabel === "Token pair" ? "LP" : `${pairLabel} LP`;
     const hasHighSlippage = slippageBps > 5_000;
     const hasExistingPool = Boolean(pair.pairAddress && pair.reserveA !== undefined && pair.reserveB !== undefined && pair.totalSupply !== undefined && pair.totalSupply > 0n);
-
-    const removeAmountAValue = tokenA.token ? parseTokenAmount(removeAmountA, tokenA.token.decimals) : undefined;
-    const removeAmountBValue = tokenB.token ? parseTokenAmount(removeAmountB, tokenB.token.decimals) : undefined;
-
-    const computedLpFromRemoveA = removeAmountAValue && pair.totalSupply && pair.reserveA && pair.reserveA > 0n
-        ? (removeAmountAValue * pair.totalSupply) / pair.reserveA
-        : undefined;
-    const computedLpFromRemoveB = removeAmountBValue && pair.totalSupply && pair.reserveB && pair.reserveB > 0n
-        ? (removeAmountBValue * pair.totalSupply) / pair.reserveB
-        : undefined;
-
-    const effectiveLpValue = removeByTokenAmount
-        ? (lastEditedRemove === "removeA" ? computedLpFromRemoveA : computedLpFromRemoveB)
-        : lpAmountValue;
+    const hasInsufficientLpBalance = Boolean(lpAmountValue !== undefined && lpToken.balance !== undefined && lpToken.balance < lpAmountValue);
+    const needsLpApproval = Boolean(lpAmountValue !== undefined && lpToken.allowance !== undefined && lpToken.allowance < lpAmountValue);
 
     const expectedTokenA = useMemo(() => {
-        if (!effectiveLpValue || !pair.reserveA || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
-        return (effectiveLpValue * pair.reserveA) / pair.totalSupply;
-    }, [effectiveLpValue, pair.reserveA, pair.totalSupply]);
+        if (!lpAmountValue || !pair.reserveA || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
+        return (lpAmountValue * pair.reserveA) / pair.totalSupply;
+    }, [lpAmountValue, pair.reserveA, pair.totalSupply]);
 
     const expectedTokenB = useMemo(() => {
-        if (!effectiveLpValue || !pair.reserveB || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
-        return (effectiveLpValue * pair.reserveB) / pair.totalSupply;
-    }, [effectiveLpValue, pair.reserveB, pair.totalSupply]);
+        if (!lpAmountValue || !pair.reserveB || !pair.totalSupply || pair.totalSupply === 0n) return undefined;
+        return (lpAmountValue * pair.reserveB) / pair.totalSupply;
+    }, [lpAmountValue, pair.reserveB, pair.totalSupply]);
 
-    // Auto-calculate the other token amount in remove-by-token mode
-    useEffect(() => {
-        if (!tokenA.token || !tokenB.token || !hasExistingPool || !removeByTokenAmount) return;
-        const rA = pair.reserveA;
-        const rB = pair.reserveB;
-        if (rA === undefined || rB === undefined) return;
-
-        if (lastEditedRemove === "removeA" && removeAmountAValue && rA > 0n) {
-            const nextB = (removeAmountAValue * rB) / rA;
-            const nextValue = formatUnits(nextB, tokenB.token.decimals);
-            if (removeAmountB !== nextValue) setRemoveAmountB(nextValue);
-        }
-
-        if (lastEditedRemove === "removeB" && removeAmountBValue && rB > 0n) {
-            const nextA = (removeAmountBValue * rA) / rB;
-            const nextValue = formatUnits(nextA, tokenA.token.decimals);
-            if (removeAmountA !== nextValue) setRemoveAmountA(nextValue);
-        }
-    }, [lastEditedRemove, removeAmountAValue, removeAmountBValue, hasExistingPool, pair.reserveA, pair.reserveB, tokenA.token, tokenB.token, removeByTokenAmount, removeAmountA, removeAmountB]);
-
-    const hasInsufficientLpBalance = Boolean(effectiveLpValue !== undefined && lpToken.balance !== undefined && lpToken.balance < effectiveLpValue);
-    const needsLpApproval = Boolean(effectiveLpValue !== undefined && lpToken.allowance !== undefined && lpToken.allowance < effectiveLpValue);
+    const selectedPositionUnderlying = selectedPosition ? positionUnderlying(selectedPosition, selectedPosition.userLpBalance) : { amountA: undefined, amountB: undefined };
+    const removeAmountShare = lpAmountValue && lpToken.balance && lpToken.balance > 0n ? formatPercentBps((lpAmountValue * 10_000n) / lpToken.balance) : "0%";
+    const displayLpAmount = isLpAmountFocused ? lpAmount : formatDisplayAmount(lpAmount, 6);
+    const lpInputClass = lpAmountClass(displayLpAmount || "0");
 
     useEffect(() => {
         if (!tokenA.token || !tokenB.token || !hasExistingPool) return;
@@ -249,6 +246,26 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         if (!loadStorage(STORAGE_KEYS.tokenOut) && deployment.deployment.tokens[1]?.address) updateTokenB(deployment.deployment.tokens[1].address);
     }, [deployment.deployment]);
 
+    useEffect(() => {
+        if (mode !== "remove" || removePositions.length !== 1 || selectedRemovePair) return;
+        const [position] = removePositions;
+        setSelectedRemovePair(position.pairAddress);
+        updateTokenA(position.tokenA.address);
+        updateTokenB(position.tokenB.address);
+    }, [mode, removePositions, selectedRemovePair]);
+
+    useEffect(() => {
+        if (mode !== "remove" || selectedRemovePair || removePositions.length === 0) return;
+
+        const currentPosition = removePositions.find(
+            (position) =>
+                (position.tokenA.address.toLowerCase() === tokenAAddress.toLowerCase() && position.tokenB.address.toLowerCase() === tokenBAddress.toLowerCase()) ||
+                (position.tokenA.address.toLowerCase() === tokenBAddress.toLowerCase() && position.tokenB.address.toLowerCase() === tokenAAddress.toLowerCase()),
+        );
+
+        if (currentPosition) setSelectedRemovePair(currentPosition.pairAddress);
+    }, [mode, removePositions, selectedRemovePair, tokenAAddress, tokenBAddress]);
+
     const canAdd = Boolean(
         isConnected &&
             publicClient &&
@@ -265,8 +282,9 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         isConnected &&
             publicClient &&
             routeSetupComplete &&
+            selectedPosition &&
             pair.pairAddress &&
-            effectiveLpValue !== undefined &&
+            lpAmountValue !== undefined &&
             !hasInsufficientLpBalance &&
             !pair.error &&
             !pair.isLoading &&
@@ -279,28 +297,27 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         if (isApproving || isConfirming) return "Confirming...";
         if (!isConnected) return "Connect Wallet";
         if (!publicClient) return "Route unavailable";
-        if (!routeSetupComplete) return "Configure pool";
-
-        if (mode === "add") {
-            if (!hasAddAmounts) return "Enter token amounts";
-            if (hasInsufficientAddBalance) return "Insufficient balance";
-            if (needsTokenAApproval && tokenA.token) return `Approve ${tokenA.token.symbol}`;
-            if (needsTokenBApproval && tokenB.token) return `Approve ${tokenB.token.symbol}`;
-            return "Add liquidity";
-        }
-
-        if (pair.isLoading) return "Finding pool";
-        if (pair.error) return "Pool unavailable";
-        if (!pair.pairAddress) return "Pool not found";
-        if (removeByTokenAmount) {
-            if (!removeAmountAValue && !removeAmountBValue) return "Enter token amounts";
-        } else {
+        if (mode === "remove") {
+            if (pools.isLoading) return "Loading positions";
+            if (removePositions.length === 0) return "No LP positions";
+            if (!selectedPosition) return "Select position";
+            if (!routeSetupComplete) return "Configure pool";
+            if (pair.isLoading) return "Finding pool";
+            if (pair.error) return "Pool unavailable";
+            if (!pair.pairAddress) return "Pool not found";
             if (!lpAmountValue) return "Enter LP amount";
+            if (hasInsufficientLpBalance) return "Insufficient LP balance";
+            if (needsLpApproval) return "Approve LP";
+            return "Remove liquidity";
         }
-        if (hasInsufficientLpBalance) return "Insufficient LP balance";
-        if (needsLpApproval) return "Approve LP";
-        return "Remove liquidity";
-    }, [hasAddAmounts, hasInsufficientAddBalance, hasInsufficientLpBalance, isApproving, isConfirming, isConnected, isWritePending, lpAmountValue, mode, needsLpApproval, needsTokenAApproval, needsTokenBApproval, pair.error, pair.isLoading, pair.pairAddress, publicClient, removeAmountAValue, removeAmountBValue, removeByTokenAmount, routeSetupComplete, tokenA.token, tokenB.token, tx.hash, tx.status]);
+
+        if (!routeSetupComplete) return "Configure pool";
+        if (!hasAddAmounts) return "Enter token amounts";
+        if (hasInsufficientAddBalance) return "Insufficient balance";
+        if (needsTokenAApproval && tokenA.token) return `Approve ${tokenA.token.symbol}`;
+        if (needsTokenBApproval && tokenB.token) return `Approve ${tokenB.token.symbol}`;
+        return "Add liquidity";
+    }, [hasAddAmounts, hasInsufficientAddBalance, hasInsufficientLpBalance, isApproving, isConfirming, isConnected, isWritePending, lpAmountValue, mode, needsLpApproval, needsTokenAApproval, needsTokenBApproval, pair.error, pair.isLoading, pair.pairAddress, pools.isLoading, publicClient, removePositions.length, routeSetupComplete, selectedPosition, tokenA.token, tokenB.token, tx.hash, tx.status]);
 
     const isActionDisabled = isConnected ? (mode === "add" ? !canAdd : !canRemove) : !openConnectModal || isBusy;
     const liquidityInlineError = tokenAAllowanceFailed || tokenBAllowanceFailed
@@ -331,8 +348,27 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         return (estimatedLp * 10_000n) / totalSupplyAfter;
     }, [estimatedLp, pair.totalSupply]);
     const depositRatio = amountAValue && amountBValue && tokenA.token && tokenB.token
-        ? `1 ${tokenA.token.symbol} = ${formatTokenAmount((amountBValue * 10n ** BigInt(tokenA.token.decimals)) / amountAValue, tokenB.token.decimals, 6)} ${tokenB.token.symbol}`
+        ? `1 ${tokenA.token.symbol} = ${formatDisplayAmount(formatTokenAmount((amountBValue * 10n ** BigInt(tokenA.token.decimals)) / amountAValue, tokenB.token.decimals, 6), 6)} ${tokenB.token.symbol}`
         : "-";
+    const pairAddressLabel = pair.isLoading ? "Finding pool..." : pair.pairAddress ? compactAddress(pair.pairAddress) : "Will be created";
+    const liquidityDetailsRows: TransactionDetailRow[] = mode === "add"
+        ? [
+              { label: "Deposit ratio", value: depositRatio },
+              { label: "Estimated LP", value: formatDisplayAmount(formatTokenAmount(estimatedLp, 18), 4) },
+              { label: "Pool share", value: formatPercentBps(poolShareBps) },
+              { label: "Slippage", value: `${slippageBps / 100}%` },
+              { label: "Deadline", value: `${deadlineMinutes} min` },
+              { label: "Pool", value: pairLabel },
+              { label: "Pair", value: pairAddressLabel },
+          ]
+        : [
+              { label: "Receive A", value: `${formatDisplayAmount(formatTokenAmount(expectedTokenA, tokenA.token?.decimals ?? 18))} ${tokenA.token?.symbol ?? ""}` },
+              { label: "Receive B", value: `${formatDisplayAmount(formatTokenAmount(expectedTokenB, tokenB.token?.decimals ?? 18))} ${tokenB.token?.symbol ?? ""}` },
+              { label: "Slippage", value: `${slippageBps / 100}%` },
+              { label: "Deadline", value: `${deadlineMinutes} min` },
+              { label: "Pool", value: pairLabel },
+              { label: "Pair", value: pairAddressLabel },
+          ];
 
     function updateRouter(value: string) {
         setRouterAddress(value);
@@ -347,6 +383,23 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     function updateTokenB(value: string) {
         setTokenBAddress(value);
         persist(STORAGE_KEYS.tokenOut, value);
+    }
+
+    function selectRemovePosition(position: PoolInfo) {
+        setSelectedRemovePair(position.pairAddress);
+        updateTokenA(position.tokenA.address);
+        updateTokenB(position.tokenB.address);
+        setLpAmount("");
+    }
+
+    function setLpPercent(percentBps: bigint) {
+        if (!lpToken.balance) return;
+        setLpAmount(formatUnits((lpToken.balance * percentBps) / 10_000n, 18));
+    }
+
+    function isLpPercentActive(percentBps: bigint) {
+        if (!lpToken.balance || lpAmountValue === undefined) return false;
+        return lpAmountValue === (lpToken.balance * percentBps) / 10_000n;
     }
 
     function updateSlippage(value: number) {
@@ -373,11 +426,6 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         setAmountB(formatUnits(tokenB.balance, tokenB.token.decimals));
     }
 
-    function setLpPercent(percentBps: bigint) {
-        if (!lpToken.balance) return;
-        setLpAmount(formatUnits((lpToken.balance * percentBps) / 10_000n, 18));
-    }
-
     function handleAmountAChange(value: string) {
         setLastEditedAmount("tokenA");
         setAmountA(value);
@@ -386,6 +434,18 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     function handleAmountBChange(value: string) {
         setLastEditedAmount("tokenB");
         setAmountB(value);
+    }
+
+    function switchLiquidityTokens() {
+        const nextTokenA = tokenBAddress;
+        const nextTokenB = tokenAAddress;
+        setTokenAAddress(nextTokenA);
+        setTokenBAddress(nextTokenB);
+        persist(STORAGE_KEYS.tokenIn, nextTokenA);
+        persist(STORAGE_KEYS.tokenOut, nextTokenB);
+        setAmountA(amountB);
+        setAmountB(amountA);
+        setLastEditedAmount((value) => (value === "tokenA" ? "tokenB" : value === "tokenB" ? "tokenA" : null));
     }
 
     async function submitAdd() {
@@ -436,7 +496,17 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
             setTx({ title: "Add liquidity submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
             const receipt = await publicClient.waitForTransactionReceipt({ hash });
             if (receipt.status !== "success") throw new Error("Add liquidity transaction reverted");
-            addHistoryEntry({ hash, type: "addLiquidity", timestamp: Date.now(), label: pairLabel });
+            addHistoryEntry({
+                hash,
+                type: "addLiquidity",
+                timestamp: Date.now(),
+                label: pairLabel,
+                pairLabel,
+                amountLabel: `${formatDisplayAmount(amountA)} ${tokenA.token.symbol} + ${formatDisplayAmount(amountB)} ${tokenB.token.symbol}`,
+                status: "confirmed",
+                blockNumber: receipt.blockNumber.toString(),
+                transactionIndex: receipt.transactionIndex,
+            });
             tokenA.refetch();
             tokenB.refetch();
             pair.refetch();
@@ -450,7 +520,7 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
     }
 
     async function submitRemove() {
-        if (!account || !publicClient || !hasValidRouter || !tokenA.token || !tokenB.token || !pair.pairAddress || effectiveLpValue === undefined) return;
+        if (!account || !publicClient || !hasValidRouter || !tokenA.token || !tokenB.token || !pair.pairAddress || lpAmountValue === undefined) return;
 
         const minTokenA = expectedTokenA === undefined ? 0n : applySlippage(expectedTokenA, slippageBps);
         const minTokenB = expectedTokenB === undefined ? 0n : applySlippage(expectedTokenB, slippageBps);
@@ -459,7 +529,7 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
         try {
             if (needsLpApproval) {
                 setTx({ title: "Approve pending", status: "pending", message: "Approving LP tokens" });
-                const hash = await approve(pair.pairAddress, routerAddress as Address, effectiveLpValue);
+                const hash = await approve(pair.pairAddress, routerAddress as Address, lpAmountValue);
                 setTx({ title: "Approve submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 if (receipt.status !== "success") throw new Error("Approval transaction reverted");
@@ -476,19 +546,29 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
                       abi: routerAbi,
                       functionName: "removeLiquidityETH",
                       args: tokenAIsNative
-                          ? [tokenB.token.address, effectiveLpValue, minTokenB, minTokenA, account, deadline]
-                          : [tokenA.token.address, effectiveLpValue, minTokenA, minTokenB, account, deadline],
+                          ? [tokenB.token.address, lpAmountValue, minTokenB, minTokenA, account, deadline]
+                          : [tokenA.token.address, lpAmountValue, minTokenA, minTokenB, account, deadline],
                   })
                 : await writeContractAsync({
                       address: routerAddress as Address,
                       abi: routerAbi,
                       functionName: "removeLiquidity",
-                      args: [tokenA.token.address, tokenB.token.address, effectiveLpValue, minTokenA, minTokenB, account, deadline],
+                      args: [tokenA.token.address, tokenB.token.address, lpAmountValue, minTokenA, minTokenB, account, deadline],
                   });
             setTx({ title: "Remove liquidity submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
             const receipt = await publicClient.waitForTransactionReceipt({ hash });
             if (receipt.status !== "success") throw new Error("Remove liquidity transaction reverted");
-            addHistoryEntry({ hash, type: "removeLiquidity", timestamp: Date.now(), label: pairLabel });
+            addHistoryEntry({
+                hash,
+                type: "removeLiquidity",
+                timestamp: Date.now(),
+                label: pairLabel,
+                pairLabel,
+                amountLabel: `Received ${formatDisplayAmount(formatTokenAmount(expectedTokenA, tokenA.token.decimals))} ${tokenA.token.symbol} + ${formatDisplayAmount(formatTokenAmount(expectedTokenB, tokenB.token.decimals))} ${tokenB.token.symbol}`,
+                status: "confirmed",
+                blockNumber: receipt.blockNumber.toString(),
+                transactionIndex: receipt.transactionIndex,
+            });
             tokenA.refetch();
             tokenB.refetch();
             pair.refetch();
@@ -508,218 +588,222 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
             return;
         }
 
-        if (mode === "add") {
-            if (!canAdd) return;
-            void submitAdd();
+        if (mode === "remove") {
+            if (!canRemove) return;
+            void submitRemove();
             return;
         }
 
-        if (!canRemove) return;
-        void submitRemove();
+        if (!canAdd) return;
+        void submitAdd();
     }
 
     return (
         <>
-            <section className="min-w-0 w-[min(100%,440px)] max-w-full rounded-[1.5rem] border border-white/10 bg-[#101624] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.35)]" aria-label="Manage liquidity">
-                <div className="mb-4 flex min-w-0 items-center justify-between gap-4">
-                    <div>
-                        <div className="inline-flex rounded-full bg-white/[0.06] p-1 text-sm font-black text-slate-400">
-                            <button
-                                type="button"
-                                onClick={() => setMode("add")}
-                                className={`rounded-full px-4 py-1.5 transition ${mode === "add" ? "bg-white text-slate-950" : "text-slate-400 hover:text-white"}`}
-                            >
-                                Add
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setMode("remove")}
-                                className={`rounded-full px-4 py-1.5 transition ${mode === "remove" ? "bg-white text-slate-950" : "text-slate-400 hover:text-white"}`}
-                            >
-                                Remove
-                            </button>
+            <section className="surface-card trade-card" aria-label="Manage liquidity">
+                <div className="liquidity-header">
+                    <div className="liquidity-heading-row">
+                        <div className="min-w-0">
+                            <h1>Liquidity</h1>
+                            <p>{mode === "add" ? "Provide" : "Remove"} liquidity for {pairLabel}</p>
                         </div>
-                        <p className="mt-2 text-xs text-slate-500">{networkLabel}</p>
-                    </div>
-
-                    <button
-                        type="button"
-                        aria-label="Open liquidity settings"
-                        onClick={() => setIsSettingsOpen(true)}
-                        className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-lg text-slate-200 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                    >
-                        ⚙
-                    </button>
-                </div>
-
-                {mode === "remove" && hasExistingPool ? (
-                    <div className="mb-3 flex items-center justify-between px-1">
-                        <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
-                            <input
-                                type="checkbox"
-                                checked={removeByTokenAmount}
-                                onChange={(e) => {
-                                    setRemoveByTokenAmount(e.target.checked);
-                                    if (!e.target.checked) {
-                                        setRemoveAmountA("");
-                                        setRemoveAmountB("");
-                                    }
-                                }}
-                                className="h-4 w-4 rounded border-white/20 bg-white/[0.06] text-pink-500 focus:ring-pink-300"
-                            />
-                            Remove by token amount
-                        </label>
-                    </div>
-                ) : null}
-
-                {mode === "add" ? (
-                    <div className="grid min-w-0 max-w-full gap-1">
-                        <TokenAmountPanel
-                            label="Token A"
-                            amount={amountA}
-                            token={tokenA.token}
-                            balance={tokenA.balance}
-                            showMax
-                            tokenTone="pay"
-                            onAmountChange={handleAmountAChange}
-                            onMax={setMaxTokenA}
-                            onTokenClick={() => setTokenDialog("tokenA")}
-                        />
-                        <TokenAmountPanel
-                            label="Token B"
-                            amount={amountB}
-                            token={tokenB.token}
-                            balance={tokenB.balance}
-                            showMax
-                            tokenTone="receive"
-                            onAmountChange={handleAmountBChange}
-                            onMax={setMaxTokenB}
-                            onTokenClick={() => setTokenDialog("tokenB")}
-                        />
-                        {hasExistingPool ? (
-                            <p className="px-2 pt-2 text-xs text-slate-500">Amounts auto-follow the current reserve ratio. Edit either side to recalculate the other.</p>
-                        ) : null}
-                    </div>
-                ) : removeByTokenAmount ? (
-                    <div className="grid min-w-0 max-w-full gap-1">
-                        <TokenAmountPanel
-                            label={tokenA.token?.symbol ?? "Token A"}
-                            amount={removeAmountA}
-                            token={tokenA.token}
-                            balance={undefined}
-                            showMax={false}
-                            tokenTone="pay"
-                            onAmountChange={(value) => {
-                                setLastEditedRemove("removeA");
-                                setRemoveAmountA(value);
-                            }}
-                            onTokenClick={() => {}}
-                        />
-                        <TokenAmountPanel
-                            label={tokenB.token?.symbol ?? "Token B"}
-                            amount={removeAmountB}
-                            token={tokenB.token}
-                            balance={undefined}
-                            showMax={false}
-                            tokenTone="receive"
-                            onAmountChange={(value) => {
-                                setLastEditedRemove("removeB");
-                                setRemoveAmountB(value);
-                            }}
-                            onTokenClick={() => {}}
-                        />
-                        {hasExistingPool ? (
-                            <p className="px-2 pt-2 text-xs text-slate-500">Enter the amount of one token; the other will auto-calculate at the current ratio.</p>
-                        ) : null}
-                    </div>
-                ) : (
-                    <section className="min-w-0 w-full max-w-full rounded-[1.25rem] bg-[#151b29] p-4 shadow-inner" aria-label="LP amount panel">
-                        <div className="flex min-w-0 items-start justify-between gap-3">
-                            <div className="min-w-0">
-                                <label htmlFor="lp-amount" className="text-sm font-bold text-slate-300">
-                                    LP tokens
-                                </label>
-                                <p className="mt-1 truncate text-xs text-slate-500">Balance: {formatTokenAmount(lpToken.balance, 18)} UNI-V2</p>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1">
-                                {[
-                                    { label: "25%", percent: 2_500n },
-                                    { label: "50%", percent: 5_000n },
-                                    { label: "75%", percent: 7_500n },
-                                    { label: "MAX", percent: 10_000n },
-                                ].map(({ label, percent }) => (
-                                    <button
-                                        key={label}
-                                        type="button"
-                                        onClick={() => setLpPercent(percent)}
-                                        className="rounded-full bg-pink-500/15 px-2.5 py-1 text-xs font-black text-pink-100 transition hover:bg-pink-500/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                                    >
-                                        {label}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="mt-4 flex min-w-0 w-full max-w-full items-center gap-2">
-                            <input
-                                id="lp-amount"
-                                value={lpAmount}
-                                type="text"
-                                inputMode="decimal"
-                                onChange={(event) => setLpAmount(sanitizeAmountInput(event.target.value, 18))}
-                                placeholder="0"
-                                aria-label="LP tokens"
-                                className="min-w-0 w-0 flex-1 bg-transparent text-2xl leading-none tracking-tight text-white outline-none placeholder:text-slate-700 sm:text-3xl"
-                            />
-                            <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.07] px-3 py-2 text-sm font-black text-white">UNI-V2</span>
-                        </div>
-                    </section>
-                )}
-
-                <div className="mt-3 min-w-0 max-w-full rounded-[1.25rem] border border-white/[0.08] bg-white/[0.035] p-3">
-                    <dl className="grid gap-2">
-                        <DetailRow label="Pool" value={pairLabel} />
-                        <DetailRow label="Pair" value={pair.isLoading ? "Finding pool..." : pair.pairAddress ? compactAddress(pair.pairAddress) : mode === "add" ? "Will be created" : "Not found"} />
-                        {mode === "add" ? (
-                            <>
-                                <DetailRow label="Deposit ratio" value={depositRatio} />
-                                <DetailRow label="Estimated LP" value={formatTokenAmount(estimatedLp, 18)} />
-                                <DetailRow label="Pool share" value={formatPercentBps(poolShareBps)} />
-                                <DetailRow label="Slippage" value={`${slippageBps / 100}%`} />
-                            </>
-                        ) : (
-                            <>
-                                <DetailRow label="Receive A" value={`${formatTokenAmount(expectedTokenA, tokenA.token?.decimals ?? 18)} ${tokenA.token?.symbol ?? ""}`} />
-                                <DetailRow label="Receive B" value={`${formatTokenAmount(expectedTokenB, tokenB.token?.decimals ?? 18)} ${tokenB.token?.symbol ?? ""}`} />
-                                {removeByTokenAmount && effectiveLpValue !== undefined ? (
-                                    <DetailRow label="LP to burn" value={`${formatTokenAmount(effectiveLpValue, 18)} UNI-V2`} />
-                                ) : null}
-                            </>
-                        )}
-                    </dl>
-
-                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.08] pt-3">
-                        <p className="min-w-0 truncate text-sm text-slate-300" aria-live="polite">
-                            {routeSetupComplete ? `${pairLabel} configured` : "Liquidity route is not configured"}
-                        </p>
                         <button
                             type="button"
+                            aria-label="Open liquidity settings"
                             onClick={() => setIsSettingsOpen(true)}
-                            className="shrink-0 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                            className="liquidity-settings-button"
                         >
-                            {routeSetupComplete ? "Settings" : "Configure"}
+                            <span aria-hidden="true">⚙</span>
+                        </button>
+                    </div>
+
+                    <div className="liquidity-mode-tabs" role="tablist" aria-label="Liquidity mode">
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={mode === "add"}
+                            className={mode === "add" ? "is-active" : ""}
+                            onClick={() => setMode("add")}
+                        >
+                            Add
+                        </button>
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={mode === "remove"}
+                            className={mode === "remove" ? "is-active" : ""}
+                            onClick={() => setMode("remove")}
+                        >
+                            Remove
                         </button>
                     </div>
                 </div>
 
+                {mode === "add" ? (
+                    <div className="grid min-w-0 max-w-full gap-3">
+                        <div className="token-panels min-w-0 max-w-full">
+                            <TokenAmountPanel
+                                label="Sell"
+                                amount={amountA}
+                                token={tokenA.token}
+                                balance={tokenA.balance}
+                                showMax
+                                tokenTone="pay"
+                                onAmountChange={handleAmountAChange}
+                                onMax={setMaxTokenA}
+                                onSelectToken={() => setTokenDialog("tokenA")}
+                            />
+
+                            <SwapDirectionButton disabled={isBusy} onClick={switchLiquidityTokens} />
+
+                            <TokenAmountPanel
+                                label="Buy"
+                                amount={amountB}
+                                token={tokenB.token}
+                                balance={tokenB.balance}
+                                showMax
+                                tokenTone="receive"
+                                onAmountChange={handleAmountBChange}
+                                onMax={setMaxTokenB}
+                                onSelectToken={() => setTokenDialog("tokenB")}
+                            />
+                        </div>
+                        <p className="px-2 pt-2 text-xs text-muted">Amounts follow the current pool ratio. Editing one amount recalculates the other.</p>
+                    </div>
+                ) : (
+                    <div className="remove-liquidity-flow">
+                        <section className="liquidity-positions" aria-label="Liquidity positions">
+                            <div className="section-kicker">Your positions</div>
+                            {pools.isLoading ? (
+                                <div className="remove-empty-state">Loading wallet positions...</div>
+                            ) : removePositions.length === 0 ? (
+                                <div className="remove-empty-state">
+                                    <p className="font-bold text-secondary">No LP positions found for this wallet.</p>
+                                    <p>Standard liquidity removal starts from an existing LP position.</p>
+                                    <div className="remove-empty-actions">
+                                        <button type="button" onClick={() => setMode("add")}>Add liquidity</button>
+                                        <Link to="/pools">View pools</Link>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="position-list">
+                                    {removePositions.map((position) => {
+                                        const isSelected = selectedRemovePair?.toLowerCase() === position.pairAddress.toLowerCase();
+                                        const underlying = positionUnderlying(position, position.userLpBalance);
+                                        const positionLabel = `${position.tokenA.symbol} / ${position.tokenB.symbol}`;
+
+                                        return (
+                                            <button
+                                                key={position.pairAddress}
+                                                type="button"
+                                                className={`position-card${isSelected ? " is-selected" : ""}`}
+                                                onClick={() => selectRemovePosition(position)}
+                                                aria-pressed={isSelected}
+                                            >
+                                                <span className="position-card-head">
+                                                    <span className="position-token-stack" aria-hidden="true">
+                                                        <span>{position.tokenA.symbol.slice(0, 2).toUpperCase()}</span>
+                                                        <span>{position.tokenB.symbol.slice(0, 2).toUpperCase()}</span>
+                                                    </span>
+                                                    <span className="position-title">
+                                                        <strong>{positionLabel}</strong>
+                                                        <small>{compactAddress(position.pairAddress)}</small>
+                                                    </span>
+                                                </span>
+                                                <span className="position-metrics">
+                                                    <span><small>LP balance</small><strong>{formatDisplayAmount(formatTokenAmount(position.userLpBalance, 18))}</strong></span>
+                                                    <span><small>Pool share</small><strong>{formatPositionShare(position.userLpBalance, position.totalSupply)}</strong></span>
+                                                    <span><small>Underlying</small><strong>{formatDisplayAmount(formatTokenAmount(underlying.amountA, position.tokenA.decimals))} {position.tokenA.symbol} + {formatDisplayAmount(formatTokenAmount(underlying.amountB, position.tokenB.decimals))} {position.tokenB.symbol}</strong></span>
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
+
+                        {selectedPosition ? (
+                            <>
+                                <div className="lp-input-panel" aria-label="LP amount panel">
+                                    <div className="lp-input-header">
+                                        <div className="min-w-0">
+                                            <label htmlFor="lp-amount" className="lp-input-label">LP amount</label>
+                                            <span className="lp-input-balance">Balance: {formatDisplayAmount(formatTokenAmount(lpToken.balance, 18), 6)} {lpTokenLabel}</span>
+                                        </div>
+                                        <span className="remove-percentage">Removing {removeAmountShare}</span>
+                                    </div>
+                                    <div className="lp-input-main">
+                                        <input
+                                            id="lp-amount"
+                                            value={displayLpAmount}
+                                            type="text"
+                                            inputMode="decimal"
+                                            autoComplete="off"
+                                            onChange={(event) => setLpAmount(sanitizeAmountInput(event.target.value, 18))}
+                                            onFocus={() => setIsLpAmountFocused(true)}
+                                            onBlur={() => setIsLpAmountFocused(false)}
+                                            placeholder="0"
+                                            aria-label="LP amount to remove"
+                                            className={lpInputClass}
+                                        />
+                                        <span className="lp-token-badge">LP</span>
+                                    </div>
+                                    <div className="lp-percentage-actions" aria-label="LP amount shortcuts">
+                                        <button type="button" className={isLpPercentActive(2_500n) ? "is-active" : ""} onClick={() => setLpPercent(2_500n)}>25%</button>
+                                        <button type="button" className={isLpPercentActive(5_000n) ? "is-active" : ""} onClick={() => setLpPercent(5_000n)}>50%</button>
+                                        <button type="button" className={isLpPercentActive(7_500n) ? "is-active" : ""} onClick={() => setLpPercent(7_500n)}>75%</button>
+                                        <button type="button" className={isLpPercentActive(10_000n) ? "is-active" : ""} onClick={() => setLpPercent(10_000n)}>Max</button>
+                                    </div>
+                                </div>
+
+                                <section className="withdrawal-estimate" aria-label="Withdrawal estimate">
+                                    <div>
+                                        <span>Receive as</span>
+                                        <strong>Receive both tokens</strong>
+                                    </div>
+                                    <p>Standard liquidity removal returns both pool assets proportionally. This router does not expose token-only withdrawal or zap-out methods.</p>
+                                    <div className="withdrawal-outputs">
+                                        <span><small>Receive {tokenA.token?.symbol ?? "Token A"}</small><strong>{formatDisplayAmount(formatTokenAmount(expectedTokenA, tokenA.token?.decimals ?? 18))}</strong></span>
+                                        <span><small>Receive {tokenB.token?.symbol ?? "Token B"}</small><strong>{formatDisplayAmount(formatTokenAmount(expectedTokenB, tokenB.token?.decimals ?? 18))}</strong></span>
+                                    </div>
+                                </section>
+                            </>
+                        ) : null}
+                    </div>
+                )}
+
+                {!routeSetupComplete ? (
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg surface-elevated p-3">
+                        <p className="min-w-0 truncate text-xs text-muted" aria-live="polite">
+                            Liquidity route is not configured
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => setIsSettingsOpen(true)}
+                            className="shrink-0 rounded-lg surface-elevated px-3 py-1.5 text-xs font-black text-secondary transition duration-150 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        >
+                            Configure
+                        </button>
+                    </div>
+                ) : null}
+
                 {liquidityInlineError ? (
-                    <p role="alert" className="mt-3 rounded-[1.25rem] border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+                    <p role="alert" className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
                         {liquidityInlineError}
                     </p>
                 ) : null}
 
-                <div className="mt-4 min-w-0 max-w-full">
-                    <SwapActionButton label={actionLabel} disabled={isActionDisabled} loading={isBusy || pair.isLoading} onClick={handlePrimaryAction} />
-                </div>
+                <SwapActionButton label={actionLabel} disabled={isActionDisabled} loading={isBusy || pair.isLoading} onClick={handlePrimaryAction} />
+
+                <TransactionDetails
+                    id="liquidity-transaction-details"
+                    summaryLabel={mode === "add" ? "Pool ratio" : "Withdrawal estimate"}
+                    summaryValue={mode === "add" ? depositRatio : pairLabel}
+                    rows={liquidityDetailsRows}
+                    open={advancedOpen}
+                    onToggle={() => setAdvancedOpen((v) => !v)}
+                    ariaLabel="Toggle liquidity details"
+                />
             </section>
 
             <SwapSettingsDialog
@@ -773,7 +857,7 @@ export function LiquidityCard({ defaultMode = "add" }: LiquidityCardProps) {
 
             <TransactionToast tx={tx} />
 
-            <SwapHistory entries={historyEntries} onClear={clearHistory} />
+            {!extHistoryEntries ? <SwapHistory entries={historyEntries} /> : null}
         </>
     );
 }

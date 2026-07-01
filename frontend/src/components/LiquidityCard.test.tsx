@@ -49,6 +49,19 @@ type MockState = {
     isWritePending: boolean;
     tokenResults: Record<string, MockTokenResult>;
     pairResult: MockPairResult;
+    pools?: {
+        pools: Array<{
+            pairAddress: Address;
+            tokenA: TokenInfo;
+            tokenB: TokenInfo;
+            reserveA: bigint;
+            reserveB: bigint;
+            totalSupply: bigint;
+            userLpBalance?: bigint;
+        }>;
+        isLoading: boolean;
+        error?: string;
+    };
     deployment?: {
         chainId: number;
         router?: Address;
@@ -104,11 +117,35 @@ vi.mock("../hooks/useApproval", () => ({
 }));
 
 vi.mock("../hooks/useTransactionHistory", () => ({
-    useTransactionHistory: () => ({ entries: [], addEntry: vi.fn(), clearHistory: vi.fn() }),
+    useTransactionHistory: () => ({ entries: [], addEntry: vi.fn(), isLoading: false, refetch: vi.fn() }),
 }));
 
 vi.mock("../hooks/useLiquidityPair", () => ({
     useLiquidityPair: () => mock.state.pairResult,
+}));
+
+vi.mock("../hooks/usePools", () => ({
+    usePools: () => {
+        const storedTokenA = localStorage.getItem("myswap:v2:tokenIn");
+        const positionTokenA = storedTokenA === NATIVE_ETH ? nativeEth : tokenA;
+
+        return {
+            pools: mock.state.pools?.pools ?? [
+                {
+                    pairAddress: PAIR,
+                    tokenA: positionTokenA,
+                    tokenB,
+                    reserveA: units("10"),
+                    reserveB: units("20"),
+                    totalSupply: units("10"),
+                    userLpBalance: units("10"),
+                },
+            ],
+            isLoading: mock.state.pools?.isLoading ?? false,
+            error: mock.state.pools?.error,
+            refetch: vi.fn(),
+        };
+    },
 }));
 
 vi.mock("../hooks/useToken", () => ({
@@ -121,7 +158,7 @@ vi.mock("../hooks/useToken", () => ({
 
 const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 };
 const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 };
-const lpToken: TokenInfo = { address: PAIR, name: "Uniswap V2", symbol: "UNI-V2", decimals: 18 };
+const lpToken: TokenInfo = { address: PAIR, name: "Pool LP", symbol: "LP", decimals: 18 };
 const nativeEth: TokenInfo = { address: NATIVE_ETH, name: "Ethereum", symbol: "ETH", decimals: 18 };
 
 function units(value: string) {
@@ -201,8 +238,8 @@ describe("LiquidityCard", () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        await user.type(screen.getByLabelText("Token A"), "1");
-        await waitFor(() => expect(screen.getByLabelText("Token B")).toHaveValue("2"));
+        await user.type(screen.getByLabelText("Sell"), "1");
+        await waitFor(() => expect(screen.getByLabelText("Buy")).toHaveValue("2"));
         await user.click(screen.getByRole("button", { name: "Add liquidity" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
@@ -218,8 +255,8 @@ describe("LiquidityCard", () => {
 
         render(<LiquidityCard />);
 
-        await user.type(screen.getByLabelText("Token A"), "1");
-        await waitFor(() => expect(screen.getByLabelText("Token B")).toHaveValue("2"));
+        await user.type(screen.getByLabelText("Sell"), "1");
+        await waitFor(() => expect(screen.getByLabelText("Buy")).toHaveValue("2"));
         await user.click(screen.getByRole("button", { name: "Add liquidity" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
@@ -238,35 +275,26 @@ describe("LiquidityCard", () => {
             },
         });
 
-        await user.type(screen.getByLabelText("Token A"), "1");
-        await waitFor(() => expect(screen.getByLabelText("Token B")).toHaveValue("2"));
+        await user.type(screen.getByLabelText("Sell"), "1");
+        await waitFor(() => expect(screen.getByLabelText("Buy")).toHaveValue("2"));
         await user.click(screen.getByRole("button", { name: "Approve TKNA" }));
 
         await waitFor(() => expect(mock.state.approve).toHaveBeenCalledTimes(1));
         expect(mock.state.writeContractAsync).not.toHaveBeenCalled();
     });
 
-    it("submits remove liquidity for an existing pool", async () => {
+    it("submits remove liquidity from LP amount without checklist", async () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        await user.click(screen.getByRole("button", { name: "Remove" }));
-        await user.type(screen.getByLabelText("LP tokens"), "1");
+        await user.click(screen.getByRole("tab", { name: "Remove" }));
+        expect(screen.queryByText("Remove by token amount")).not.toBeInTheDocument();
+
+        await user.type(screen.getByLabelText("LP amount to remove"), "1");
         await user.click(screen.getByRole("button", { name: "Remove liquidity" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
         expect(mock.state.writeContractAsync).toHaveBeenCalledWith(expect.objectContaining({ functionName: "removeLiquidity" }));
-    });
-
-    it("filters non-numeric LP amount characters", async () => {
-        const user = userEvent.setup();
-        renderConfigured();
-
-        await user.click(screen.getByRole("button", { name: "Remove" }));
-        const input = screen.getByLabelText("LP tokens");
-        await user.type(input, "1x.2.3e");
-
-        expect(input).toHaveValue("1.23");
     });
 
     it("submits native ETH remove liquidity with removeLiquidityETH", async () => {
@@ -278,27 +306,13 @@ describe("LiquidityCard", () => {
 
         render(<LiquidityCard defaultMode="remove" />);
 
-        await user.type(screen.getByLabelText("LP tokens"), "1");
+        await user.type(screen.getByLabelText("LP amount to remove"), "1");
         await user.click(screen.getByRole("button", { name: "Remove liquidity" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
         const request = mock.state.writeContractAsync.mock.calls[0][0];
         expect(request).toEqual(expect.objectContaining({ functionName: "removeLiquidityETH" }));
         expect(request.args[0]).toBe(TOKEN_B);
-    });
-
-    it("disables remove liquidity when the pool does not exist", async () => {
-        const user = userEvent.setup();
-        renderConfigured({
-            pairResult: {
-                isLoading: false,
-                refetch: vi.fn(),
-            },
-        });
-
-        await user.click(screen.getByRole("button", { name: "Remove" }));
-
-        expect(screen.getByRole("button", { name: "Pool not found" })).toBeDisabled();
     });
 
     it("keeps liquidity page focused without marketing hero", () => {

@@ -4,71 +4,100 @@ import { isAddress } from "viem";
 
 import { useDeploymentConfig } from "../hooks/useDeploymentConfig";
 import { type PoolInfo, usePools } from "../hooks/usePools";
-import { compactAddress, formatTokenAmount } from "../lib/format";
+import { compactAddress, formatDisplayAmount, formatTokenAmount } from "../lib/format";
 import { DEFAULT_ROUTER_ADDRESS, STORAGE_KEYS, loadStorage, persist } from "../lib/tradeConfig";
 
 type PoolSortMode = "liquidity" | "userLp" | "pair";
 
 function PoolSkeleton() {
     return (
-        <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.035] p-4">
-            <div className="h-5 w-40 animate-pulse rounded-full bg-white/10" />
-            <div className="mt-4 grid gap-2">
-                <div className="h-4 animate-pulse rounded-full bg-white/[0.08]" />
-                <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/[0.08]" />
+        <div className="pool-card" aria-hidden="true">
+            <div className="h-9 w-44 animate-pulse rounded bg-white/10" />
+            <div className="mt-5 h-20 animate-pulse rounded-2xl bg-white/[0.06]" />
+            <div className="mt-4 grid gap-3">
+                <div className="h-3 animate-pulse rounded bg-white/[0.08]" />
+                <div className="h-3 w-4/5 animate-pulse rounded bg-white/[0.08]" />
+                <div className="h-3 w-2/3 animate-pulse rounded bg-white/[0.08]" />
             </div>
         </div>
     );
 }
 
+function SearchIcon() {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="m14.5 14.5 3 3M8.8 15.6a6.8 6.8 0 1 1 0-13.6 6.8 6.8 0 0 1 0 13.6Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+    );
+}
+
+function SettingsIcon() {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 12.7a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4Z" stroke="currentColor" strokeWidth="1.7" />
+            <path d="M3.6 11.8a6.9 6.9 0 0 1 0-3.6l1.8-.4c.2-.5.4-.9.7-1.3l-.6-1.8a7 7 0 0 1 3.1-1.8l1.2 1.4h.4l1.2-1.4a7 7 0 0 1 3.1 1.8l-.6 1.8c.3.4.5.8.7 1.3l1.8.4a6.9 6.9 0 0 1 0 3.6l-1.8.4c-.2.5-.4.9-.7 1.3l.6 1.8a7 7 0 0 1-3.1 1.8l-1.2-1.4h-.4l-1.2 1.4a7 7 0 0 1-3.1-1.8l.6-1.8c-.3-.4-.5-.8-.7-1.3l-1.8-.4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
 function PoolCard({ pool, onAction }: { pool: PoolInfo; onAction: (pool: PoolInfo, action: "swap" | "add" | "remove") => void }) {
     const pairLabel = `${pool.tokenA.symbol} / ${pool.tokenB.symbol}`;
+    const totalLiquidity = formatDisplayAmount(formatTokenAmount(pool.reserveA + pool.reserveB, 18, 8), 4);
+    const reserveA = formatDisplayAmount(formatTokenAmount(pool.reserveA, pool.tokenA.decimals, 8), 4);
+    const reserveB = formatDisplayAmount(formatTokenAmount(pool.reserveB, pool.tokenB.decimals, 8), 4);
+    const userLp = formatDisplayAmount(formatTokenAmount(pool.userLpBalance, 18, 8), 4);
 
     return (
-        <article className="rounded-[1.35rem] border border-white/10 bg-[#101624] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
-            <div className="flex min-w-0 items-start justify-between gap-4">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-pink-500 to-blue-500 text-xs font-black text-white">
+        <article
+            className="pool-card"
+            onClick={() => onAction(pool, "swap")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onAction(pool, "swap"); } }}
+        >
+            <header className="pool-card-header">
+                <div className="pool-pair">
+                    <div className="pool-token-icons" aria-hidden="true">
+                        <span className="grid place-items-center bg-gradient-to-br from-pink-500 to-blue-500 text-xs font-black text-white">
                             {pool.tokenA.symbol.slice(0, 2).toUpperCase()}
                         </span>
-                        <span className="-ml-4 grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 text-xs font-black text-white ring-4 ring-[#101624]">
+                        <span className="grid place-items-center bg-gradient-to-br from-blue-500 to-cyan-400 text-xs font-black text-white">
                             {pool.tokenB.symbol.slice(0, 2).toUpperCase()}
                         </span>
-                        <h2 className="truncate text-lg font-black text-white">{pairLabel}</h2>
                     </div>
-                    <p className="mt-2 truncate text-xs text-slate-500">Pair {compactAddress(pool.pairAddress)}</p>
+                    <div className="min-w-0">
+                        <h2>{pairLabel}</h2>
+                        <a href={`#${pool.pairAddress}`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }}>{compactAddress(pool.pairAddress)}</a>
+                    </div>
                 </div>
-                <span className="rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-xs font-black text-emerald-100">Active</span>
+                <span className="pool-status">Active</span>
+            </header>
+
+            <div className="pool-primary-metric">
+                <span>Total liquidity</span>
+                <strong>{totalLiquidity}</strong>
             </div>
 
-            <dl className="mt-5 grid gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.035] p-3 text-sm">
-                <div className="flex justify-between gap-3">
-                    <dt className="text-slate-500">Reserve {pool.tokenA.symbol}</dt>
-                    <dd className="truncate text-right font-bold text-slate-200">{formatTokenAmount(pool.reserveA, pool.tokenA.decimals)}</dd>
+            <dl className="pool-metrics">
+                <div>
+                    <dt>Reserve {pool.tokenA.symbol}</dt>
+                    <dd>{reserveA}</dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                    <dt className="text-slate-500">Reserve {pool.tokenB.symbol}</dt>
-                    <dd className="truncate text-right font-bold text-slate-200">{formatTokenAmount(pool.reserveB, pool.tokenB.decimals)}</dd>
+                <div>
+                    <dt>Reserve {pool.tokenB.symbol}</dt>
+                    <dd>{reserveB}</dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                    <dt className="text-slate-500">Total LP</dt>
-                    <dd className="truncate text-right font-bold text-slate-200">{formatTokenAmount(pool.totalSupply, 18)}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                    <dt className="text-slate-500">Your LP</dt>
-                    <dd className="truncate text-right font-bold text-slate-200">{formatTokenAmount(pool.userLpBalance, 18)}</dd>
+                <div>
+                    <dt>Your LP</dt>
+                    <dd>{userLp}</dd>
                 </div>
             </dl>
 
-            <div className="mt-4 grid grid-cols-3 gap-2">
-                <button type="button" onClick={() => onAction(pool, "swap")} className="rounded-2xl bg-white px-3 py-2 text-sm font-black text-slate-950 transition hover:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300">
-                    Swap
+            <div className="pool-card-actions">
+                <button type="button" onClick={(e) => { e.stopPropagation(); onAction(pool, "add"); }} className="pool-primary-action">
+                    Add liquidity
                 </button>
-                <button type="button" onClick={() => onAction(pool, "add")} className="rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-black text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300">
-                    Add
-                </button>
-                <button type="button" onClick={() => onAction(pool, "remove")} className="rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm font-black text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300">
+                <button type="button" onClick={(e) => { e.stopPropagation(); onAction(pool, "remove"); }} className="pool-secondary-action">
                     Remove
                 </button>
             </div>
@@ -83,6 +112,7 @@ export function PoolsPage() {
     const [search, setSearch] = useState("");
     const [sortMode, setSortMode] = useState<PoolSortMode>("liquidity");
     const [pairLimit, setPairLimit] = useState(50);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const pools = usePools(routerAddress, pairLimit);
 
     useEffect(() => {
@@ -132,91 +162,114 @@ export function PoolsPage() {
     const canLoadMore = hasValidRouter && !pools.isLoading && !pools.error && pools.totalPairs > pairLimit;
 
     return (
-        <div className="min-h-[calc(100vh-5rem)] w-full px-4 py-8 sm:min-h-[calc(100vh-5.5rem)] sm:px-6">
+        <div className="w-full px-4 py-8 sm:px-6">
             <section className="mx-auto w-full max-w-6xl">
-                <div className="flex flex-col gap-4 rounded-[1.75rem] border border-white/10 bg-[#101624]/80 p-5 shadow-[0_22px_70px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:flex-row sm:items-end sm:justify-between">
+                <div className="pools-heading">
                     <div>
-                        <p className="text-sm font-black uppercase tracking-[0.22em] text-pink-200">Pool explorer</p>
-                        <h1 className="mt-2 text-3xl font-black tracking-tight text-white">Discover liquidity pools</h1>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Pools are read directly from the configured router factory. Select a pool to swap, add, or remove liquidity.</p>
+                        <h1>Pools</h1>
+                        <p>Discover liquidity pools and manage your positions.</p>
                     </div>
-                    <label className="grid min-w-0 gap-2 text-sm font-bold text-slate-300 sm:w-[22rem]">
-                        Router address
-                        <input
-                            value={routerAddress}
-                            onChange={(event) => handleRouterChange(event.target.value)}
-                            placeholder="0x router contract"
-                            spellCheck={false}
-                            aria-invalid={Boolean(routerAddress) && !hasValidRouter}
-                            className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                        />
-                    </label>
+                    <button
+                        type="button"
+                        onClick={() => setSettingsOpen((v) => !v)}
+                        className="router-settings-button"
+                    >
+                        <SettingsIcon />
+                        <span>{settingsOpen ? "Hide settings" : "Router settings"}</span>
+                    </button>
                 </div>
 
-                <div className="mt-4 grid gap-3 rounded-[1.35rem] border border-white/10 bg-white/[0.035] p-4 sm:grid-cols-[1fr_14rem]">
-                    <label className="grid gap-2 text-sm font-bold text-slate-300">
-                        Search pools
+                {settingsOpen ? (
+                    <div className="mt-4 rounded-lg surface-elevated p-4">
+                        <label className="grid gap-2 text-sm font-bold text-secondary">
+                            Router address
+                            <input
+                                value={routerAddress}
+                                onChange={(event) => handleRouterChange(event.target.value)}
+                                placeholder="0x router contract"
+                                spellCheck={false}
+                                aria-invalid={Boolean(routerAddress) && !hasValidRouter}
+                                className="rounded-lg surface-input px-4 py-3 text-sm text-primary outline-none placeholder:text-slate-600 focus:border-pink-300 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-pink-300"
+                            />
+                        </label>
+                    </div>
+                ) : null}
+
+                <div className="pool-toolbar">
+                    <div className="pool-search-wrap">
+                        <SearchIcon />
+                        <span className="sr-only">Search pools</span>
                         <input
+                            type="search"
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
-                            placeholder="Symbol, token address, or pair address"
+                            placeholder="Search by symbol, token, or pair address"
+                            aria-label="Search pools"
                             spellCheck={false}
-                            className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                            className="pool-search-input"
                         />
-                    </label>
-                    <label className="grid gap-2 text-sm font-bold text-slate-300">
-                        Sort by
+                    </div>
+                    <div className="pool-sort-wrap">
+                        <label htmlFor="pool-sort" className="sr-only">Sort by</label>
+                        <span className="pool-sort-prefix">Sort by</span>
                         <select
+                            id="pool-sort"
                             value={sortMode}
                             onChange={(event) => setSortMode(event.target.value as PoolSortMode)}
-                            className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                            className="pool-sort-select"
                         >
                             <option value="liquidity">Total LP</option>
                             <option value="userLp">Your LP</option>
                             <option value="pair">Pair name</option>
                         </select>
-                    </label>
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="select-chevron">
+                            <path d="M5 7.5 10 12.5l5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                    </div>
                 </div>
 
                 {!hasValidRouter ? (
-                    <div className="mt-5 rounded-[1.35rem] border border-dashed border-white/10 bg-white/[0.035] p-6 text-center text-slate-400">
-                        Configure a router address to discover pools.
+                    <div className="mt-6 rounded-lg border border-dashed border-white/10 surface-elevated p-8 text-center text-muted">
+                        <p className="font-black text-secondary">Configure a router address</p>
+                        <p className="mt-1 text-sm">Open Router settings above to discover pools.</p>
                     </div>
                 ) : pools.error ? (
-                    <div role="alert" className="mt-5 rounded-[1.35rem] border border-red-300/20 bg-red-300/10 p-6 text-red-100">
-                        Pool discovery failed. Check the router address and network.
+                    <div role="alert" className="pool-state-card is-error">
+                        <p>Pool discovery failed</p>
+                        <span>Check the router address and network.</span>
+                        <button type="button" onClick={pools.refetch}>Retry</button>
                     </div>
                 ) : pools.isLoading || deployment.isLoading ? (
-                    <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="pool-grid">
                         <PoolSkeleton />
                         <PoolSkeleton />
                         <PoolSkeleton />
                     </div>
                 ) : pools.pools.length === 0 ? (
-                    <div className="mt-5 rounded-[1.35rem] border border-dashed border-white/10 bg-white/[0.035] p-6 text-center">
-                        <p className="font-black text-white">No pools found</p>
-                        <p className="mt-2 text-sm text-slate-400">Create the first pair from the Liquidity page.</p>
+                    <div className="pool-state-card">
+                        <p>No pools found</p>
+                        <span>Try another symbol, token, or pair address.</span>
                     </div>
                 ) : filteredPools.length === 0 ? (
-                    <div className="mt-5 rounded-[1.35rem] border border-dashed border-white/10 bg-white/[0.035] p-6 text-center">
-                        <p className="font-black text-white">No matching pools</p>
-                        <p className="mt-2 text-sm text-slate-400">Try a different token symbol, token address, or pair address.</p>
+                    <div className="pool-state-card">
+                        <p>No pools found</p>
+                        <span>Try another symbol, token, or pair address.</span>
                     </div>
                 ) : (
                     <>
-                        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="pool-grid">
                             {filteredPools.map((pool) => (
                                 <PoolCard key={pool.pairAddress} pool={pool} onAction={handleAction} />
                             ))}
                         </div>
                         {canLoadMore ? (
-                            <div className="mt-5 flex justify-center">
+                            <div className="mt-6 flex justify-center">
                                 <button
                                     type="button"
                                     onClick={() => setPairLimit((value) => value + 50)}
-                                    className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                                    className="rounded-lg surface-elevated px-5 py-3 text-sm font-black text-secondary transition duration-150 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
                                 >
-                                    Load more pools ({pools.pools.length}/{pools.totalPairs})
+                                    Load more ({pools.pools.length}/{pools.totalPairs})
                                 </button>
                             </div>
                         ) : null}

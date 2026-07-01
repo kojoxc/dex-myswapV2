@@ -1,78 +1,93 @@
 import { ConnectButton } from "@rainbow-me/rainbowkit";
+import type { RefObject } from "react";
 import { NavLink } from "react-router-dom";
 
-export function Navbar() {
+type NavbarProps = {
+    activityOpen: boolean;
+    pendingCount?: number;
+    onActivityClick: () => void;
+    activityButtonRef: RefObject<HTMLButtonElement>;
+};
+
+function ActivityIcon() {
     return (
-        <header className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4 sm:h-[72px] sm:px-6">
-            <div className="flex min-w-0 items-center gap-3">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-pink-500 via-fuchsia-500 to-blue-500 font-black shadow-glow">
-                    M
-                </div>
-                <div className="hidden min-w-0 sm:block">
-                    <p className="text-sm font-black tracking-wide text-white">MySwap</p>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+        </svg>
+    );
+}
+
+export function Navbar({ activityOpen, pendingCount = 0, onActivityClick, activityButtonRef }: NavbarProps) {
+    const linkClass = ({ isActive }: { isActive: boolean }) =>
+        isActive ? "is-active" : "";
+
+    return (
+        <header className="app-header">
+            <div className="app-header-inner">
+                <div className="brand-group">
+                    <img src="/logo.png" alt="MySwap" className="brand-mark" />
+                    <span className="brand-name">MySwap</span>
                 </div>
 
-                <nav className="ml-0 rounded-full border border-white/10 bg-white/[0.04] p-1 sm:ml-4">
-                    <NavLink
-                        to="/swap"
-                        className={({ isActive }) =>
-                            `rounded-full px-3 py-2 text-sm font-black transition sm:px-4 ${
-                                isActive ? "bg-white text-slate-950" : "text-slate-300 hover:text-white"
-                            }`
-                        }
-                    >
+                <nav className="primary-nav" aria-label="Primary">
+                    <NavLink to="/swap" className={linkClass}>
                         Swap
                     </NavLink>
-                    <NavLink
-                        to="/liquidity"
-                        className={({ isActive }) =>
-                            `rounded-full px-3 py-2 text-sm font-black transition sm:px-4 ${
-                                isActive ? "bg-white text-slate-950" : "text-slate-300 hover:text-white"
-                            }`
-                        }
-                    >
+                    <NavLink to="/liquidity" className={linkClass}>
                         Liquidity
                     </NavLink>
-                    <NavLink
-                        to="/pools"
-                        className={({ isActive }) =>
-                            `rounded-full px-3 py-2 text-sm font-black transition sm:px-4 ${
-                                isActive ? "bg-white text-slate-950" : "text-slate-300 hover:text-white"
-                            }`
-                        }
-                    >
+                    <NavLink to="/pools" className={linkClass}>
                         Pools
                     </NavLink>
                 </nav>
+
+                <ConnectButton.Custom>
+                    {({ account, chain, mounted, openAccountModal, openChainModal, openConnectModal }) => {
+                        const connected = mounted && account && chain;
+
+                        return (
+                            <div className="header-actions" aria-hidden={!mounted}>
+                                <button
+                                    type="button"
+                                    disabled={!connected}
+                                    onClick={openChainModal}
+                                    className="network-control"
+                                    aria-label="Switch network"
+                                >
+                                    <span className={`network-dot${chain?.unsupported ? " is-unsupported" : ""}`} />
+                                    <span className="network-label-long">{chain?.unsupported ? "Wrong network" : (chain?.name ?? "Network")}</span>
+                                    <span className="network-label-short">{chain?.unsupported ? "Wrong" : (chain?.name ?? "Network")}</span>
+                                </button>
+
+                                <button
+                                    ref={activityButtonRef}
+                                    type="button"
+                                    aria-label="Open activity drawer"
+                                    aria-expanded={activityOpen}
+                                    onClick={onActivityClick}
+                                    className="activity-control"
+                                >
+                                    <ActivityIcon />
+                                    <span className="activity-label">Activity</span>
+                                    {pendingCount > 0 ? (
+                                        <span className="badge-pending">{pendingCount}</span>
+                                    ) : null}
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={connected ? openAccountModal : openConnectModal}
+                                    className="wallet-control"
+                                    aria-label={connected ? "Account" : "Connect wallet"}
+                                >
+                                    {connected ? account.displayName : "Connect"}
+                                </button>
+                            </div>
+                        );
+                    }}
+                </ConnectButton.Custom>
             </div>
-
-            <ConnectButton.Custom>
-                {({ account, chain, mounted, openAccountModal, openChainModal, openConnectModal }) => {
-                    const connected = mounted && account && chain;
-
-                    return (
-                        <div className="flex shrink-0 items-center gap-2" aria-hidden={!mounted}>
-                            <button
-                                type="button"
-                                disabled={!connected}
-                                onClick={openChainModal}
-                                className="hidden h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 text-sm font-black text-slate-100 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300 min-[420px]:flex"
-                            >
-                                <span className={chain?.unsupported ? "h-2 w-2 rounded-full bg-red-300" : "h-2 w-2 rounded-full bg-emerald-300"} />
-                                <span className="max-w-28 truncate">{chain?.unsupported ? "Wrong network" : chain?.name ?? "Network"}</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={connected ? openAccountModal : openConnectModal}
-                                className="h-10 rounded-full bg-white px-3 text-sm font-black text-slate-950 transition hover:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300 sm:px-4"
-                            >
-                                {connected ? account.displayName : <><span className="sm:hidden">Connect</span><span className="hidden sm:inline">Connect Wallet</span></>}
-                            </button>
-                        </div>
-                    );
-                }}
-            </ConnectButton.Custom>
         </header>
     );
 }

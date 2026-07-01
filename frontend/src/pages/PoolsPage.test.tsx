@@ -84,7 +84,7 @@ describe("PoolsPage", () => {
         renderPage();
 
         expect(screen.getByText("TKNA / TKNB")).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Swap" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Add liquidity" })).toBeInTheDocument();
         expect(screen.getAllByText("Your LP").length).toBeGreaterThan(0);
     });
 
@@ -94,7 +94,7 @@ describe("PoolsPage", () => {
         mock.totalPairs = 1;
         renderPage();
 
-        await user.click(screen.getByRole("button", { name: "Add" }));
+        await user.click(screen.getByRole("button", { name: "Add liquidity" }));
 
         expect(localStorage.getItem("myswap:v2:tokenIn")).toBe(TOKEN_A);
         expect(localStorage.getItem("myswap:v2:tokenOut")).toBe(TOKEN_B);

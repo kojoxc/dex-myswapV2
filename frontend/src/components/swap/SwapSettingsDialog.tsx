@@ -33,9 +33,9 @@ type ContractInputProps = {
 function ContractInput({ label, value, placeholder, isValid, onChange }: ContractInputProps) {
     return (
         <label className="grid gap-2">
-            <span className="flex items-center justify-between gap-3 text-sm font-bold text-slate-300">
+            <span className="flex items-center justify-between gap-3 text-sm font-bold text-secondary">
                 {label}
-                <span aria-hidden="true" className="text-xs text-slate-500">{isValid ? "Configured" : "Required"}</span>
+                <span aria-hidden="true" className="text-xs text-muted">{isValid ? "Configured" : "Required"}</span>
             </span>
             <input
                 value={value}
@@ -44,7 +44,7 @@ function ContractInput({ label, value, placeholder, isValid, onChange }: Contrac
                 spellCheck={false}
                 aria-label={label}
                 aria-invalid={!isValid}
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                className="rounded-lg surface-input px-4 py-3 text-sm text-primary outline-none placeholder:text-slate-600 focus:border-pink-300 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-pink-300"
             />
         </label>
     );
@@ -63,10 +63,10 @@ export function SwapSettingsDialog(props: SwapSettingsDialogProps) {
             <div className="grid gap-5">
                 <section className="grid gap-3" aria-labelledby="route-settings-title">
                     <div>
-                        <h3 id="route-settings-title" className="text-sm font-black text-white">
+                        <h3 id="route-settings-title" className="text-sm font-black text-primary">
                             {routeTitle}
                         </h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-400">Only needed for local or development deployments.</p>
+                        <p className="mt-1 text-sm leading-6 text-secondary">Only needed for local or development deployments.</p>
                     </div>
 
                     <ContractInput
@@ -94,14 +94,14 @@ export function SwapSettingsDialog(props: SwapSettingsDialogProps) {
 
                 <section className="grid gap-3 border-t border-white/10 pt-5" aria-labelledby="advanced-settings-title">
                     <div>
-                        <h3 id="advanced-settings-title" className="text-sm font-black text-white">
+                        <h3 id="advanced-settings-title" className="text-sm font-black text-primary">
                             Advanced settings
                         </h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-400">Defaults are safe for normal swaps.</p>
+                        <p className="mt-1 text-sm leading-6 text-secondary">Defaults are safe for normal swaps.</p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <label className="grid gap-2 text-sm font-bold text-slate-300">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <label className="min-w-0 grid gap-2 text-sm font-bold text-secondary">
                             Slippage %
                             <input
                                 value={slippagePercent}
@@ -110,11 +110,11 @@ export function SwapSettingsDialog(props: SwapSettingsDialogProps) {
                                 step="0.1"
                                 onChange={(event) => props.onSlippageChange(Number(event.target.value) * 100)}
                                 aria-invalid={hasHighSlippage}
-                                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-100 outline-none focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                                className="w-full min-w-0 rounded-lg surface-input px-4 py-3 text-primary outline-none focus:border-pink-300 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-pink-300"
                             />
                         </label>
 
-                        <label className="grid gap-2 text-sm font-bold text-slate-300">
+                        <label className="min-w-0 grid gap-2 text-sm font-bold text-secondary">
                             Deadline min
                             <input
                                 value={props.deadlineMinutes}
@@ -122,13 +122,13 @@ export function SwapSettingsDialog(props: SwapSettingsDialogProps) {
                                 min="1"
                                 step="1"
                                 onChange={(event) => props.onDeadlineChange(Number(event.target.value))}
-                                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-100 outline-none focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                                className="w-full min-w-0 rounded-lg surface-input px-4 py-3 text-primary outline-none focus:border-pink-300 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-pink-300"
                             />
                         </label>
                     </div>
 
                     {hasHighSlippage ? (
-                        <p role="alert" className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+                        <p role="alert" className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
                             Slippage is very high. Your received amount may be much lower than quoted.
                         </p>
                     ) : null}

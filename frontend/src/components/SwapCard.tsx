@@ -7,12 +7,12 @@ import { routerAbi } from "../abis";
 import { useApproval } from "../hooks/useApproval";
 import { useDeploymentConfig } from "../hooks/useDeploymentConfig";
 import { useLiquidityPair } from "../hooks/useLiquidityPair";
-import { type SwapQuoteMode, useSwapQuote } from "../hooks/useSwapQuote";
+import { useSwapQuote } from "../hooks/useSwapQuote";
 import { useToken } from "../hooks/useToken";
 import { useTokenList } from "../hooks/useTokenList";
 import { useTransactionHistory } from "../hooks/useTransactionHistory";
 import { normalizeTransactionError } from "../lib/errors";
-import { formatTokenAmount } from "../lib/format";
+import { formatDisplayAmount, formatTokenAmount } from "../lib/format";
 import { getWethAddress, isNativeAddress, NATIVE_ETH_ADDRESS } from "../lib/tokenRegistry";
 import {
     DEFAULT_DEADLINE_MINUTES,
@@ -26,6 +26,7 @@ import {
     sanitizeDeadlineMinutes,
     sanitizeSlippageBps,
 } from "../lib/tradeConfig";
+import type { HistoryEntry } from "../hooks/useTransactionHistory";
 import type { TransactionState } from "../types";
 import { QuoteDetails } from "./swap/QuoteDetails";
 import { SwapActionButton } from "./swap/SwapActionButton";
@@ -48,7 +49,12 @@ function resolveAddress(address: string, weth: Address | undefined): Address {
     return address as Address;
 }
 
-export function SwapCard() {
+type SwapCardProps = {
+    historyEntries?: HistoryEntry[];
+    onAddHistoryEntry?: (entry: HistoryEntry) => void;
+};
+
+export function SwapCard({ historyEntries: extHistoryEntries, onAddHistoryEntry: extAddHistoryEntry }: SwapCardProps = {}) {
     const { address: account, chain, isConnected } = useAccount();
     const { openConnectModal } = useConnectModal();
     const publicClient = usePublicClient();
@@ -60,13 +66,15 @@ export function SwapCard() {
     const [tokenInAddress, setTokenInAddress] = useState(() => loadStorage(STORAGE_KEYS.tokenIn, DEFAULT_TOKEN_IN_ADDRESS));
     const [tokenOutAddress, setTokenOutAddress] = useState(() => loadStorage(STORAGE_KEYS.tokenOut, DEFAULT_TOKEN_OUT_ADDRESS));
     const [amount, setAmount] = useState("");
-    const [quoteMode, setQuoteMode] = useState<SwapQuoteMode>("exactIn");
     const [slippageBps, setSlippageBps] = useState(() => sanitizeSlippageBps(Number(loadStorage(STORAGE_KEYS.slippageBps, String(DEFAULT_SLIPPAGE_BPS)))));
     const [deadlineMinutes, setDeadlineMinutes] = useState(() => sanitizeDeadlineMinutes(Number(loadStorage(STORAGE_KEYS.deadlineMinutes, String(DEFAULT_DEADLINE_MINUTES)))));
     const [tx, setTx] = useState<TransactionState>({ title: "", status: "idle" });
     const [isConfirming, setIsConfirming] = useState(false);
+    const [isRefreshingQuote, setIsRefreshingQuote] = useState(false);
     const [now, setNow] = useState(() => Date.now());
-    const { entries: historyEntries, addEntry: addHistoryEntry, clearHistory } = useTransactionHistory();
+    const internalHistory = useTransactionHistory();
+    const historyEntries = extHistoryEntries ?? internalHistory.entries;
+    const addHistoryEntry = extAddHistoryEntry ?? internalHistory.addEntry;
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [tokenDialog, setTokenDialog] = useState<"pay" | "receive" | null>(null);
 
@@ -84,7 +92,6 @@ export function SwapCard() {
         intermediateToken: weth.token,
         amount,
         slippageBps,
-        quoteMode,
     });
     const quotePair = useLiquidityPair({ routerAddress, tokenA: tokenIn.token, tokenB: tokenOut.token, wethAddress });
 
@@ -111,18 +118,13 @@ export function SwapCard() {
     const hasValidTokenOutAddress = isAddress(tokenOutAddress) || tokenOutIsNative;
     const hasNativeRouteWeth = !(tokenInIsNative || tokenOutIsNative) || Boolean(wethAddress);
     const routeSetupComplete = hasValidRouter && hasValidTokenInAddress && hasValidTokenOutAddress && hasNativeRouteWeth && !(tokenInIsNative && tokenOutIsNative);
-    const requiredAmountIn = quoteMode === "exactOut" ? quote.amountInMax : quote.amountIn;
-    const hasTypedAmount = quoteMode === "exactOut"
-        ? quote.amountOut !== undefined && quote.amountOut > 0n
-        : quote.amountIn !== undefined && quote.amountIn > 0n;
+    const hasTypedAmount = quote.amountIn !== undefined && quote.amountIn > 0n;
     const hasQuotedAmount = quote.amountIn !== undefined && quote.amountIn > 0n && quote.amountOut !== undefined && quote.amountOut > 0n;
-    const hasInsufficientBalance = Boolean(isConnected && requiredAmountIn !== undefined && tokenIn.balance !== undefined && tokenIn.balance < requiredAmountIn);
+    const hasInsufficientBalance = Boolean(isConnected && quote.amountIn !== undefined && tokenIn.balance !== undefined && tokenIn.balance < quote.amountIn);
     const isBusy = isApproving || isSwapPending || isConfirming;
 
     const networkLabel = chain?.name ?? "EVM";
     const routeLabel = quote.routeLabel ?? (tokenIn.token && tokenOut.token ? `${tokenIn.token.symbol} to ${tokenOut.token.symbol}` : "Direct token route");
-    const inputValue = quoteMode === "exactOut" && quote.amountIn && tokenIn.token ? formatTokenAmount(quote.amountIn, tokenIn.token.decimals, 8) : amount;
-    const outputValue = quoteMode === "exactOut" ? amount : quote.amountOut && tokenOut.token ? formatTokenAmount(quote.amountOut, tokenOut.token.decimals, 8) : "";
     const shouldShowQuote = routeSetupComplete && Boolean(amount) && hasTypedAmount;
     const hasHighSlippage = slippageBps > 5_000;
     const isQuoteStale = Boolean(quote.updatedAt && hasQuotedAmount && now - quote.updatedAt > 30_000 && !quote.isLoading);
@@ -143,9 +145,9 @@ export function SwapCard() {
     }, [deployment.deployment]);
 
     const needsApproval = useMemo(() => {
-        if (!requiredAmountIn || tokenIn.allowance === undefined) return false;
-        return tokenIn.allowance < requiredAmountIn;
-    }, [requiredAmountIn, tokenIn.allowance]);
+        if (!quote.amountIn || tokenIn.allowance === undefined) return false;
+        return tokenIn.allowance < quote.amountIn;
+    }, [quote.amountIn, tokenIn.allowance]);
 
     const priceImpactBps = useMemo(() => {
         if (!quote.amountIn || !quote.amountOut || quote.path?.length !== 2 || !quotePair.reserveA || !quotePair.reserveB || quotePair.reserveA === 0n) return undefined;
@@ -161,9 +163,10 @@ export function SwapCard() {
             tokenIn.token &&
             tokenOut.token &&
             hasQuotedAmount &&
-            (quoteMode === "exactOut" ? quote.amountInMax !== undefined : quote.amountOutMin !== undefined) &&
+            quote.amountOutMin !== undefined &&
             !quote.error &&
             !quote.isLoading &&
+            !isQuoteStale &&
             !hasInsufficientBalance &&
             !isBusy,
     );
@@ -186,18 +189,9 @@ export function SwapCard() {
     }, [hasQuotedAmount, hasTypedAmount, hasInsufficientBalance, isApproving, isConfirming, isConnected, isSwapPending, needsApproval, publicClient, quote.error, quote.isLoading, routeSetupComplete, tokenIn.token, tokenOut.token, tx.hash, tx.status]);
 
     const isActionDisabled = isConnected ? !canSubmit : !openConnectModal || isBusy;
-    const routeStatusMessage = routeSetupComplete ? `Route configured: ${routeLabel}` : "Swap route is not configured";
-    const inlineError = !publicClient && isConnected
-        ? "Unsupported network or RPC unavailable. Switch to a supported EVM network."
-        : !hasNativeRouteWeth
-          ? "Native ETH routes require a configured WETH address for this network."
-          : tokenInIsNative && tokenOutIsNative
-            ? "Select one native token side and one ERC20 token side."
-            : tokenIn.error || tokenOut.error
-          ? "Token is not supported or metadata could not be loaded."
-          : hasHighSlippage
-            ? "Slippage is very high. Review settings before swapping."
-            : undefined;
+    const displayedActionLabel = isRefreshingQuote ? "Refreshing quote…" : isQuoteStale ? "Refresh quote" : actionLabel;
+    const displayedActionDisabled = isRefreshingQuote || (isQuoteStale ? quote.isLoading : isActionDisabled);
+    const displayedActionLoading = isRefreshingQuote || (!isQuoteStale && (isBusy || quote.isLoading));
 
     function updateRouter(value: string) {
         setRouterAddress(value);
@@ -238,30 +232,30 @@ export function SwapCard() {
         setAmount(formatUnits(tokenIn.balance, tokenIn.token.decimals));
     }
 
-    function updateQuoteMode(nextMode: SwapQuoteMode) {
-        if (nextMode === quoteMode) return;
-        setQuoteMode(nextMode);
-        setAmount("");
+    async function refreshQuote() {
+        if (isRefreshingQuote || quote.isLoading) return;
+        setIsRefreshingQuote(true);
+        try {
+            await quote.refetch();
+        } finally {
+            setIsRefreshingQuote(false);
+        }
     }
 
     async function submit() {
         if (!account || !hasValidRouter || !tokenIn.token || !tokenOut.token || quote.amountIn === undefined || quote.amountIn <= 0n || quote.amountOut === undefined || quote.amountOut <= 0n) return;
-        if (quoteMode === "exactIn" && quote.amountOutMin === undefined) return;
-        if (quoteMode === "exactOut" && quote.amountInMax === undefined) return;
+        if (quote.amountOutMin === undefined) return;
         if (!publicClient) {
             setTx({ title: "Unsupported network", status: "error", message: "Switch to a supported EVM network or check your RPC URL." });
             return;
         }
-
-        const maxInput = quoteMode === "exactOut" ? quote.amountInMax : quote.amountIn;
-        if (maxInput === undefined) return;
 
         setIsConfirming(true);
         try {
             if (needsApproval) {
                 if (!tokenIn.token) return;
                 setTx({ title: "Approve pending", status: "pending", message: `Approving ${tokenIn.token.symbol}` });
-                const hash = await approve(resolveAddress(tokenIn.token.address, wethAddress), routerAddress as Address, maxInput);
+                const hash = await approve(resolveAddress(tokenIn.token.address, wethAddress), routerAddress as Address, quote.amountIn);
                 setTx({ title: "Approve submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 if (receipt.status !== "success") throw new Error("Approval transaction reverted");
@@ -276,53 +270,41 @@ export function SwapCard() {
             );
 
             setTx({ title: "Swap pending", status: "pending", message: "Confirm the transaction in your wallet" });
-            const hash = quoteMode === "exactOut"
-                ? tokenInIsNative
-                    ? await writeContractAsync({
-                          address: routerAddress as Address,
-                          abi: routerAbi,
-                          functionName: "swapETHForExactTokens",
-                          args: [quote.amountOut, path, account, deadline],
-                          value: maxInput,
-                      })
-                    : tokenOutIsNative
-                      ? await writeContractAsync({
-                            address: routerAddress as Address,
-                            abi: routerAbi,
-                            functionName: "swapTokensForExactETH",
-                            args: [quote.amountOut, maxInput, path, account, deadline],
-                        })
-                      : await writeContractAsync({
-                            address: routerAddress as Address,
-                            abi: routerAbi,
-                            functionName: "swapTokensForExactTokens",
-                            args: [quote.amountOut, maxInput, path, account, deadline],
-                        })
-                : tokenInIsNative
+            const hash = tokenInIsNative
+                ? await writeContractAsync({
+                      address: routerAddress as Address,
+                      abi: routerAbi,
+                      functionName: "swapExactETHForTokens",
+                      args: [quote.amountOutMin!, path, account, deadline],
+                      value: quote.amountIn,
+                  })
+                : tokenOutIsNative
                   ? await writeContractAsync({
                         address: routerAddress as Address,
                         abi: routerAbi,
-                        functionName: "swapExactETHForTokens",
-                        args: [quote.amountOutMin!, path, account, deadline],
-                        value: quote.amountIn,
+                        functionName: "swapExactTokensForETH",
+                        args: [quote.amountIn, quote.amountOutMin!, path, account, deadline],
                     })
-                  : tokenOutIsNative
-                    ? await writeContractAsync({
-                          address: routerAddress as Address,
-                          abi: routerAbi,
-                          functionName: "swapExactTokensForETH",
-                          args: [quote.amountIn, quote.amountOutMin!, path, account, deadline],
-                      })
-                    : await writeContractAsync({
-                          address: routerAddress as Address,
-                          abi: routerAbi,
-                          functionName: "swapExactTokensForTokens",
-                          args: [quote.amountIn, quote.amountOutMin!, path, account, deadline],
-                      });
+                  : await writeContractAsync({
+                        address: routerAddress as Address,
+                        abi: routerAbi,
+                        functionName: "swapExactTokensForTokens",
+                        args: [quote.amountIn, quote.amountOutMin!, path, account, deadline],
+                    });
             setTx({ title: "Swap submitted", status: "pending", hash, message: "Waiting for on-chain confirmation" });
             const receipt = await publicClient.waitForTransactionReceipt({ hash });
             if (receipt.status !== "success") throw new Error("Swap transaction reverted");
-            addHistoryEntry({ hash, type: "swap", timestamp: Date.now(), label: `${tokenIn.token?.symbol ?? ""} → ${tokenOut.token?.symbol ?? ""}` });
+            addHistoryEntry({
+                hash,
+                type: "swap",
+                timestamp: Date.now(),
+                label: `${tokenIn.token?.symbol ?? ""} → ${tokenOut.token?.symbol ?? ""}`,
+                pairLabel: `${tokenIn.token?.symbol ?? ""} → ${tokenOut.token?.symbol ?? ""}`,
+                amountLabel: `${formatDisplayAmount(amount)} ${tokenIn.token?.symbol ?? ""} → ${formatDisplayAmount(formatTokenAmount(quote.amountOut, tokenOut.token?.decimals ?? 18))} ${tokenOut.token?.symbol ?? ""}`,
+                status: "confirmed",
+                blockNumber: receipt.blockNumber.toString(),
+                transactionIndex: receipt.transactionIndex,
+            });
             tokenIn.refetch();
             tokenOut.refetch();
             setTx({ title: "Swap confirmed", status: "success", hash, message: "Balances updated." });
@@ -350,129 +332,115 @@ export function SwapCard() {
         void submit();
     }
 
+    function handleActionButtonClick() {
+        if (isQuoteStale) {
+            void refreshQuote();
+            return;
+        }
+
+        handlePrimaryAction();
+    }
+
+    function WarningIcon() {
+        return (
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M10 3 18 17H2L10 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                <path d="M10 8v4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                <path d="M10 15h.01" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+            </svg>
+        );
+    }
+
     return (
         <>
-            <section className="min-w-0 w-[min(100%,440px)] max-w-full rounded-[1.5rem] border border-white/10 bg-[#101624] p-5 shadow-[0_22px_70px_rgba(0,0,0,0.35)]" aria-label="Swap tokens">
-                <div className="mb-4 flex min-w-0 items-center justify-between gap-4">
-                    <div>
-                        <div className="inline-flex rounded-full bg-white/[0.06] p-1 text-sm font-black text-slate-400">
-                            <span className="rounded-full bg-white px-4 py-1.5 text-slate-950">Swap</span>
-                        </div>
-                        <p className="mt-2 text-xs text-slate-500">{networkLabel}</p>
-                        <div className="mt-3 inline-flex rounded-full bg-white/[0.06] p-1 text-xs font-black text-slate-400">
-                            <button
-                                type="button"
-                                onClick={() => updateQuoteMode("exactIn")}
-                                className={`rounded-full px-3 py-1.5 transition ${quoteMode === "exactIn" ? "bg-white text-slate-950" : "text-slate-400 hover:text-white"}`}
-                            >
-                                Exact in
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => updateQuoteMode("exactOut")}
-                                className={`rounded-full px-3 py-1.5 transition ${quoteMode === "exactOut" ? "bg-white text-slate-950" : "text-slate-400 hover:text-white"}`}
-                            >
-                                Exact out
-                            </button>
-                        </div>
+            <section className="surface-card trade-card" aria-label="Swap tokens">
+                <div className="mb-5 flex min-w-0 items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <h1 className="font-black tracking-tight text-primary">Swap</h1>
+                        <p className="mt-0.5 text-sm text-secondary">Trade tokens instantly</p>
                     </div>
-
                     <button
                         type="button"
                         aria-label="Open swap settings"
                         onClick={() => setIsSettingsOpen(true)}
-                        className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-lg text-slate-200 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg surface-elevated text-sm text-muted transition duration-150 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
                     >
                         ⚙
                     </button>
                 </div>
 
-                <div className="grid min-w-0 max-w-full gap-1">
+                <div className="token-panels min-w-0 max-w-full">
                     <TokenAmountPanel
-                        label="You pay"
-                        amount={inputValue}
+                        label="Sell"
+                        amount={amount}
                         token={tokenIn.token}
                         balance={tokenIn.balance}
-                        readOnly={quoteMode === "exactOut"}
-                        isLoading={quote.isLoading && quoteMode === "exactOut"}
-                        showMax={quoteMode === "exactIn"}
                         tokenTone="pay"
-                        onAmountChange={quoteMode === "exactIn" ? setAmount : undefined}
-                        onMax={quoteMode === "exactIn" ? setMaxAmount : undefined}
-                        onTokenClick={() => setTokenDialog("pay")}
+                        showMax
+                        onAmountChange={setAmount}
+                        onMax={setMaxAmount}
+                        onSelectToken={() => setTokenDialog("pay")}
                     />
 
                     <SwapDirectionButton disabled={quote.isLoading || isBusy} onClick={switchTokens} />
 
                     <TokenAmountPanel
-                        label="You receive"
-                        amount={outputValue}
+                        label="Buy"
+                        amount={quote.amountOut && tokenOut.token ? formatDisplayAmount(formatTokenAmount(quote.amountOut, tokenOut.token.decimals, 8)) : ""}
                         token={tokenOut.token}
                         balance={tokenOut.balance}
-                        readOnly={quoteMode === "exactIn"}
-                        isLoading={quote.isLoading && quoteMode === "exactIn"}
+                        readOnly
+                        isLoading={quote.isLoading}
                         tokenTone="receive"
-                        onAmountChange={quoteMode === "exactOut" ? setAmount : undefined}
-                        onTokenClick={() => setTokenDialog("receive")}
+                        onSelectToken={() => setTokenDialog("receive")}
                     />
                 </div>
 
-                <div className="mt-2 min-w-0 max-w-full rounded-[1.25rem] border border-white/[0.08] bg-white/[0.035] p-3">
-                    <div className="flex min-w-0 items-center justify-between gap-3">
-                        <p className="min-w-0 truncate text-sm text-slate-300" aria-live="polite">
-                            {routeStatusMessage}
+                {!routeSetupComplete ? (
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg surface-elevated p-3">
+                        <p className="min-w-0 truncate text-xs text-muted" aria-live="polite">
+                            Swap route is not configured
                         </p>
-                        <div className="flex shrink-0 items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={quote.refetch}
-                                disabled={!hasTypedAmount || quote.isLoading || !routeSetupComplete}
-                                className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                                Refresh quote
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setIsSettingsOpen(true)}
-                                className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-black text-slate-100 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                            >
-                                {routeSetupComplete ? "Settings" : "Configure route"}
-                            </button>
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setIsSettingsOpen(true)}
+                            className="shrink-0 rounded-lg surface-elevated px-3 py-1.5 text-xs font-black text-secondary transition duration-150 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        >
+                            Configure route
+                        </button>
                     </div>
-                </div>
+                ) : null}
 
-                {inlineError ? (
-                    <p role="alert" className="mt-3 rounded-[1.25rem] border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
-                        {inlineError}
+                {hasHighSlippage ? (
+                    <p role="alert" className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+                        Slippage is very high. Review settings before swapping.
                     </p>
                 ) : null}
 
-                <div className="mt-3 min-w-0 max-w-full">
-                    <QuoteDetails
-                        show={shouldShowQuote}
-                        isLoading={quote.isLoading}
-                        error={quote.error}
-                        rate={quote.rate}
-                        priceImpact={formatPercentBps(priceImpactBps)}
-                        amountOutMin={quote.amountOutMin}
-                        amountInMax={quote.amountInMax}
-                        quoteMode={quoteMode}
-                        tokenIn={tokenIn.token}
-                        tokenOut={tokenOut.token}
-                        routeLabel={routeLabel}
-                        routes={quote.routes}
-                        selectedRouteIndex={quote.selectedRouteIndex}
-                        onRouteChange={quote.setSelectedRouteIndex}
-                        isStale={isQuoteStale}
-                        updatedAt={quote.updatedAt}
-                        onRefresh={quote.refetch}
-                    />
-                </div>
+                <QuoteDetails
+                    show={shouldShowQuote}
+                    isLoading={quote.isLoading}
+                    error={quote.error}
+                    rate={quote.rate}
+                    priceImpact={formatPercentBps(priceImpactBps)}
+                    amountOutMin={quote.amountOutMin}
+                    tokenIn={tokenIn.token}
+                    tokenOut={tokenOut.token}
+                    routeLabel={routeLabel}
+                    routes={quote.routes}
+                    selectedRouteIndex={quote.selectedRouteIndex}
+                    onRouteChange={quote.setSelectedRouteIndex}
+                    updatedAt={quote.updatedAt}
+                />
 
-                <div className="mt-4 min-w-0 max-w-full">
-                    <SwapActionButton label={actionLabel} disabled={isActionDisabled} loading={isBusy || quote.isLoading} onClick={handlePrimaryAction} />
-                </div>
+                {isQuoteStale ? (
+                    <div className="quote-warning" role="status">
+                        <WarningIcon />
+                        <span>Quote expired. Refresh to get the latest price.</span>
+                    </div>
+                ) : null}
+
+                <SwapActionButton label={displayedActionLabel} disabled={displayedActionDisabled} loading={displayedActionLoading} onClick={handleActionButtonClick} />
             </section>
 
             <SwapSettingsDialog
@@ -525,7 +493,7 @@ export function SwapCard() {
 
             <TransactionToast tx={tx} />
 
-            <SwapHistory entries={historyEntries} onClear={clearHistory} />
+            {!extHistoryEntries ? <SwapHistory entries={historyEntries} /> : null}
         </>
     );
 }

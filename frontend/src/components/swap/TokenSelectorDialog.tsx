@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { type Address, isAddress } from "viem";
 import { usePublicClient } from "wagmi";
 
@@ -8,7 +8,6 @@ import type { SupportedToken } from "../../lib/tokenRegistry";
 import { compactAddress } from "../../lib/format";
 import type { TokenInfo } from "../../types";
 import { Skeleton } from "../Skeleton";
-import { Dialog } from "./Dialog";
 
 type TokenSelectorDialogProps = {
     open: boolean;
@@ -41,25 +40,36 @@ function tokenAvatarTone(symbol?: string) {
     return tones[seed % tones.length];
 }
 
-function getTokenLabel(token: { address?: string; name: string }): string {
-    if (token.address && token.address.toLowerCase() === NATIVE_ETH_ADDRESS.toLowerCase()) {
-        return `${token.name} (Native)`;
-    }
-    return `${token.name} \u2022 ${compactAddress(token.address)}`;
+function SearchIcon() {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="m14.5 14.5 3 3M8.8 15.6a6.8 6.8 0 1 1 0-13.6 6.8 6.8 0 0 1 0 13.6Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+    );
 }
 
-function getListTokenLabel(token: SupportedToken): string {
-    if (token.type === "native") {
-        return `${token.name} (Native)`;
-    }
-    return `${token.name} \u2022 ${compactAddress(token.address!)}`;
+function XIcon() {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+    );
 }
 
 function getSourceLabel(token: SupportedToken) {
-    if (token.source === "deployment") return "Deployment";
-    if (token.source === "external") return "Token list";
+    if (token.type === "native") return "Native";
+    if (token.source === "deployment") return "Token";
+    if (token.source === "external") return "Token";
     if (token.source === "custom") return "Custom";
-    return "Default";
+    return "Token";
+}
+
+function tokenAddress(token: SupportedToken) {
+    return token.type === "native" ? NATIVE_ETH_ADDRESS : token.address;
+}
+
+function tokenKey(token: SupportedToken) {
+    return `${token.symbol}-${token.address ?? "native"}`;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -84,13 +94,53 @@ export function TokenSelectorDialog(props: TokenSelectorDialogProps) {
     const publicClient = usePublicClient();
     const [search, setSearch] = useState("");
     const [manualStatus, setManualStatus] = useState<ManualStatus>("idle");
+    const dialogRef = useRef<HTMLElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const previousFocusRef = useRef<HTMLElement | null>(null);
 
     useEffect(() => {
         if (props.open) {
             setSearch("");
             setManualStatus("idle");
+            previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            window.setTimeout(() => inputRef.current?.focus(), 0);
         }
     }, [props.open]);
+
+    useEffect(() => {
+        if (!props.open) return;
+
+        function handleKeyDown(event: KeyboardEvent) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                props.onClose();
+                previousFocusRef.current?.focus();
+                return;
+            }
+
+            if (event.key !== "Tab" || !dialogRef.current) return;
+
+            const focusable = Array.from(
+                dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'),
+            ).filter((element) => !element.hasAttribute("aria-hidden"));
+
+            if (focusable.length === 0) return;
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        }
+
+        document.addEventListener("keydown", handleKeyDown);
+        return () => document.removeEventListener("keydown", handleKeyDown);
+    }, [props.open, props.onClose]);
 
     const isManualEntry = isAddress(search.trim());
 
@@ -176,117 +226,173 @@ export function TokenSelectorDialog(props: TokenSelectorDialogProps) {
         }
     }
 
+    function closeDialog() {
+        props.onClose();
+        window.setTimeout(() => previousFocusRef.current?.focus(), 0);
+    }
+
     function handleTokenSelect(token: SupportedToken) {
         if (token.type === "native") {
             props.onChange("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
         } else if (token.address) {
             props.onChange(token.address);
         }
-        props.onClose();
+        closeDialog();
     }
 
-    const canDone = isManualEntry ? isManualSupported || manualStatus === "supported" : Boolean(props.value && props.isValidAddress);
+    function handleCurrentTokenSelect() {
+        if (!props.token || !props.isValidAddress) return;
+        closeDialog();
+    }
+
+    function handleBackdropMouseDown(event: MouseEvent<HTMLDivElement>) {
+        if (event.target === event.currentTarget) closeDialog();
+    }
+
+    const quickTokens = useMemo(
+        () => filterTokens(props.tokens ?? [], "")
+            .filter((token) => {
+                const address = tokenAddress(token)?.toLowerCase();
+                return address && address !== props.excludeAddress?.toLowerCase();
+            })
+            .slice(0, 6),
+        [props.tokens, props.excludeAddress],
+    );
+
+    const showManualToken = isManualEntry && (manualStatus === "supported" || isManualSupported) && props.token && props.isValidAddress;
+
+    function renderTokenRow(listedToken: SupportedToken) {
+        const address = tokenAddress(listedToken);
+        const selected = address?.toLowerCase() === props.value.toLowerCase();
+        const addressLabel = listedToken.type === "erc20" && listedToken.address ? compactAddress(listedToken.address) : undefined;
+
+        return (
+            <button
+                key={tokenKey(listedToken)}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => handleTokenSelect(listedToken)}
+                className="token-row"
+            >
+                <span className={`token-row-icon grid place-items-center bg-gradient-to-br ${tokenAvatarTone(listedToken.symbol)} text-xs font-black text-white`}>
+                    {tokenInitials(listedToken)}
+                </span>
+                <span className="token-row-main">
+                    <span className="token-row-title">
+                        <span className="token-row-symbol">{listedToken.symbol}</span>
+                    </span>
+                    <span className="token-row-name">{listedToken.name}</span>
+                    {addressLabel ? <span className="token-row-address">{addressLabel}</span> : null}
+                </span>
+                <span className="token-badge">{getSourceLabel(listedToken)}</span>
+            </button>
+        );
+    }
+
+    if (!props.open) return null;
 
     return (
-        <Dialog open={props.open} title={props.title} onClose={props.onClose}>
-            <div className="grid gap-4">
-                <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-4" aria-label="Supported tokens">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            <p className="text-lg font-black tracking-tight text-white">Select a token</p>
-                            <p className="mt-1 text-sm text-slate-500">Select a supported token or enter a contract address.</p>
-                        </div>
-                        {props.tokenListLoading ? <Skeleton className="h-5 w-16 shrink-0" /> : null}
+        <div className="token-dialog-backdrop" role="presentation" onMouseDown={handleBackdropMouseDown}>
+            <section
+                ref={dialogRef}
+                className="token-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="token-dialog-title"
+                aria-describedby="token-dialog-description"
+            >
+                <header className="token-dialog-header">
+                    <div>
+                        <h2 id="token-dialog-title">Select a token</h2>
+                        <p id="token-dialog-description">Search by symbol, name, or contract address.</p>
                     </div>
+                    <button type="button" className="token-dialog-close" aria-label="Close token selector" onClick={closeDialog}>
+                        <XIcon />
+                    </button>
+                </header>
 
-                    <label className="mt-4 block">
-                        <span className="sr-only">Search by token or address</span>
-                        <input
-                            value={search}
-                            onChange={(event) => handleSearchChange(event.target.value)}
-                            placeholder="Search by token or address"
-                            spellCheck={false}
-                            className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-pink-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                        />
-                    </label>
+                <div className="token-search-wrap">
+                    <SearchIcon />
+                    <input
+                        ref={inputRef}
+                        type="search"
+                        value={search}
+                        onChange={(event) => handleSearchChange(event.target.value)}
+                        placeholder="Search token or address"
+                        aria-label="Search token or address"
+                        spellCheck={false}
+                    />
+                </div>
 
-                    {isManualEntry ? (
-                        <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-black/10 p-3">
-                            {manualStatus === "supported" ? (
-                                <p className="text-sm text-emerald-300">Token verified. Press Done to confirm.</p>
-                            ) : manualStatus === "checking" ? (
-                                <p className="text-sm text-slate-400">Checking token contract...</p>
-                            ) : manualStatus === "rpc-error" ? (
-                                <p className="text-sm text-amber-100">Could not verify this token safely. It was not added.</p>
-                            ) : (
-                                <p className="text-sm text-amber-100">Unsupported token. Paste a valid ERC-20 contract address for this network.</p>
-                            )}
+                {quickTokens.length > 0 ? (
+                    <div className="token-quick-list" aria-label="Quick token list">
+                        {quickTokens.map((token) => (
+                            <button key={tokenKey(token)} type="button" className="token-quick-chip" onClick={() => handleTokenSelect(token)}>
+                                <span className={`token-icon grid place-items-center bg-gradient-to-br ${tokenAvatarTone(token.symbol)} text-[0.6rem] font-black text-white`}>
+                                    {tokenInitials(token)}
+                                </span>
+                                {token.symbol}
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
+
+                <div className="token-list-header">
+                    <span>Available tokens</span>
+                    <span>{listedTokens.length + (showManualToken ? 1 : 0)}</span>
+                </div>
+
+                <div className="token-list" role="listbox" aria-label="Available tokens">
+                    {showManualToken ? (
+                        <button type="button" role="option" aria-selected className="token-row" onClick={handleCurrentTokenSelect}>
+                            <span className={`token-row-icon grid place-items-center bg-gradient-to-br ${tokenAvatarTone(props.token?.symbol)} text-xs font-black text-white`}>
+                                {tokenInitials(props.token)}
+                            </span>
+                            <span className="token-row-main">
+                                <span className="token-row-title">
+                                    <span className="token-row-symbol">{props.token?.symbol}</span>
+                                </span>
+                                <span className="token-row-name">{props.token?.name}</span>
+                                <span className="token-row-address">{compactAddress(props.token?.address)}</span>
+                            </span>
+                            <span className="token-badge">Custom</span>
+                        </button>
+                    ) : null}
+
+                    {listedTokens.map(renderTokenRow)}
+
+                    {props.tokenListLoading ? (
+                        <div className="token-list-loading" role="status">
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
                         </div>
                     ) : null}
 
-                    {listedTokens.length > 0 ? (
-                        <div className="mt-3 grid max-h-72 overflow-y-auto pr-1">
-                            {listedTokens.map((listedToken) => (
-                                <button
-                                    key={`${listedToken.symbol}-${listedToken.address ?? "native"}`}
-                                    type="button"
-                                    onClick={() => handleTokenSelect(listedToken)}
-                                    className="flex min-w-0 items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                                >
-                                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br ${tokenAvatarTone(listedToken.symbol)} text-xs font-black text-white`}>
-                                        {tokenInitials(listedToken)}
-                                    </span>
-                                    <span className="min-w-0">
-                                        <span className="block truncate text-sm font-black text-white">{listedToken.symbol}</span>
-                                        <span className="block truncate text-xs text-slate-500">{getListTokenLabel(listedToken)}</span>
-                                        <span className="mt-1 inline-flex rounded-full bg-white/[0.06] px-2 py-0.5 text-[0.65rem] font-black uppercase tracking-[0.12em] text-slate-500">{getSourceLabel(listedToken)}</span>
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-                    ) : !isManualEntry ? (
-                        <p className="mt-3 rounded-2xl border border-dashed border-white/10 bg-black/10 p-3 text-sm text-slate-400">
-                            No tokens found for this network. Paste a valid supported contract address in the search field.
-                        </p>
-                    ) : null}
-                </section>
+                    {manualStatus === "checking" ? <p className="token-empty-state">Checking token contract...</p> : null}
 
-                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <div className="flex items-center gap-3">
-                        <div className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-pink-500 to-blue-500 text-sm font-black">
-                            {tokenInitials(props.token)}
+                    {isManualEntry && !showManualToken && manualStatus !== "checking" ? (
+                        <div className="token-empty-state" role="status">
+                            <strong>Token not found on this network.</strong>
+                            <span>Paste a supported ERC-20 contract address for the active network.</span>
                         </div>
-                        <div className="min-w-0">
-                            <p className="font-black text-white">
-                                {props.token?.symbol ?? (props.isLoading ? <Skeleton className="h-4 w-20 inline-block" /> : "Token preview")}
-                            </p>
-                            <p className="truncate text-sm text-slate-400">
-                                {props.token
-                                    ? getTokenLabel(props.token)
-                                    : "Select a token from the list or paste an address."}
-                            </p>
+                    ) : null}
+
+                    {!isManualEntry && listedTokens.length === 0 && !props.tokenListLoading ? (
+                        <div className="token-empty-state" role="status">
+                            <strong>No tokens found</strong>
+                            <span>Try another symbol or contract address.</span>
                         </div>
-                    </div>
+                    ) : null}
 
                     {props.error ? (
-                        <p role="alert" className="mt-3 text-sm text-red-200">
+                        <p role="alert" className="token-error-state">
                             Token is not supported or the RPC could not load its metadata.
                         </p>
                     ) : null}
-                    {props.value && !props.isValidAddress && !isManualSupported ? (
-                        <p className="mt-3 text-sm text-amber-100">Enter a valid supported token address.</p>
-                    ) : null}
                 </div>
-
-                <button
-                    type="button"
-                    disabled={!canDone}
-                    onClick={props.onClose}
-                    className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                    Done
-                </button>
-            </div>
-        </Dialog>
+            </section>
+        </div>
     );
 }

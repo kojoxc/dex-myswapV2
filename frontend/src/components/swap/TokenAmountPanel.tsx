@@ -1,6 +1,8 @@
+import { useState } from "react";
+
 import type { TokenInfo } from "../../types";
 import { sanitizeAmountInput } from "../../lib/amountInput";
-import { formatTokenAmount } from "../../lib/format";
+import { formatDisplayAmount, formatTokenAmount } from "../../lib/format";
 import { Skeleton } from "../Skeleton";
 
 type TokenAmountPanelProps = {
@@ -8,81 +10,113 @@ type TokenAmountPanelProps = {
     amount: string;
     token?: TokenInfo;
     balance?: bigint;
+    fiatValue?: string;
     readOnly?: boolean;
     isLoading?: boolean;
     showMax?: boolean;
+    disabled?: boolean;
     tokenTone: "pay" | "receive";
     onAmountChange?: (value: string) => void;
     onMax?: () => void;
-    onTokenClick: () => void;
+    onSelectToken: () => void;
 };
 
 function tokenInitials(token?: TokenInfo) {
     return token?.symbol?.slice(0, 2).toUpperCase() ?? "--";
 }
 
+function ChevronDownIcon() {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M5 7.5 10 12.5l5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
+function WalletIcon() {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M3.5 6.5h13v9h-13a2 2 0 0 1-2-2v-9a2 2 0 0 0 2 2Zm0 0h11.5v-2h-11.5a2 2 0 0 0 0 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M13.5 11h1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+    );
+}
+
+function amountSizeClass(display: string): string {
+    const len = display.replace(/,/g, "").length;
+    if (len > 12) return "amount-long";
+    if (len > 9) return "amount-medium";
+    return "amount-short";
+}
+
 export function TokenAmountPanel(props: TokenAmountPanelProps) {
+    const [isAmountFocused, setIsAmountFocused] = useState(false);
     const gradient = props.tokenTone === "pay" ? "from-pink-500 to-blue-500" : "from-blue-500 to-cyan-400";
     const inputId = props.tokenTone === "pay" ? "pay-amount" : "receive-amount";
+    const raw = props.amount;
+    const displayAmount = props.readOnly || !isAmountFocused ? formatDisplayAmount(raw, 6) : raw;
+    const formattedBalance = formatDisplayAmount(formatTokenAmount(props.balance, props.token?.decimals ?? 18), 6);
+    const inputClass = `${amountSizeClass(displayAmount || "0")} ${props.readOnly ? "token-amount-value" : "token-amount-input"}`;
 
     return (
-        <section className="min-w-0 w-full max-w-full rounded-[1.25rem] bg-[#151b29] p-4 shadow-inner" aria-label={`${props.label} panel`}>
-            <div className="flex min-w-0 items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <label id={`${inputId}-label`} htmlFor={inputId} className="text-sm font-bold text-slate-300">
-                        {props.label}
-                    </label>
-                    <p className="mt-1 truncate text-xs text-slate-500">
-                        Balance: {formatTokenAmount(props.balance, props.token?.decimals ?? 18)} {props.token?.symbol ?? ""}
-                    </p>
-                </div>
+        <section className="token-input-panel min-w-0 w-full max-w-full" aria-label={`${props.label} panel`}>
+            <label id={`${inputId}-label`} htmlFor={inputId} className="token-panel-label">
+                {props.label}
+            </label>
 
-                {props.showMax ? (
-                    <button
-                        type="button"
-                        onClick={props.onMax}
-                        className="rounded-full bg-pink-500/15 px-3 py-1 text-xs font-black text-pink-100 transition hover:bg-pink-500/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                    >
-                        MAX
-                    </button>
-                ) : null}
-            </div>
-
-            <div className="mt-4 flex min-w-0 w-full max-w-full items-center gap-2">
+            <div className="token-panel-main">
                 {props.isLoading ? (
-                    <Skeleton className="h-8 w-40 sm:h-10" />
+                    <Skeleton className="h-12 w-40" />
                 ) : (
                     <input
                         id={inputId}
-                        value={props.amount}
+                        value={displayAmount}
                         type="text"
                         inputMode="decimal"
+                        autoComplete="off"
                         readOnly={props.readOnly}
+                        disabled={props.disabled}
                         onChange={(event) => props.onAmountChange?.(sanitizeAmountInput(event.target.value, props.token?.decimals))}
+                        onFocus={() => setIsAmountFocused(true)}
+                        onBlur={() => setIsAmountFocused(false)}
                         placeholder="0"
                         aria-label={props.label}
-                        className="min-w-0 w-0 flex-1 bg-transparent text-2xl leading-none tracking-tight text-white outline-none placeholder:text-slate-700 sm:text-3xl"
+                        className={inputClass}
                     />
                 )}
 
                 {props.isLoading && !props.token ? (
-                    <Skeleton className="h-10 w-24" />
+                    <Skeleton className="h-[52px] w-28" />
                 ) : (
                     <button
                         type="button"
-                        onClick={props.onTokenClick}
-                        aria-label={`Select ${props.tokenTone === "pay" ? "pay" : "receive"} token`}
-                        className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] py-1.5 pl-1.5 pr-2.5 transition hover:border-pink-300/40 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        onClick={props.onSelectToken}
+                        disabled={props.disabled}
+                        aria-label={`Select ${props.label} token`}
+                        className="token-selector"
                     >
-                        <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-br ${gradient} text-[0.6rem] font-black text-white`}>
+                        <span className={`token-icon grid shrink-0 place-items-center bg-gradient-to-br ${gradient} font-black text-white`}>
                             {tokenInitials(props.token)}
                         </span>
-                        <span className="max-w-[5.5rem] truncate text-sm font-black text-white">{props.token?.symbol ?? "Select"}</span>
-                        <span aria-hidden="true" className="text-slate-500">
-                            v
-                        </span>
+                        <span className="max-w-[5.5rem] truncate">{props.token?.symbol ?? "Select"}</span>
+                        <ChevronDownIcon />
                     </button>
                 )}
+            </div>
+
+            <div className="token-panel-footer">
+                <span className="fiat-value">{props.fiatValue ?? "$0.00"}</span>
+                <div className="balance-group">
+                    <button type="button" className="balance-action" onClick={props.showMax ? props.onMax : undefined} disabled={!props.showMax || props.disabled}>
+                        <WalletIcon />
+                        <span>Balance: {formattedBalance}</span>
+                    </button>
+                    {props.showMax ? (
+                        <button type="button" className="max-action" onClick={props.onMax} disabled={props.disabled}>
+                            Max
+                        </button>
+                    ) : null}
+                </div>
             </div>
         </section>
     );

@@ -15,7 +15,7 @@ const ACCOUNT = "0x0000000000000000000000000000000000005000" as Address;
 const WETH = "0x0000000000000000000000000000000000006000" as Address;
 const NATIVE_ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as Address;
 const HASH = "0x0000000000000000000000000000000000000000000000000000000000009999" as `0x${string}`;
-const QUOTE_UPDATED_AT = 1_700_000_000_000;
+const QUOTE_UPDATED_AT = Date.now();
 
 type MockTokenResult = {
     token?: TokenInfo;
@@ -101,7 +101,7 @@ vi.mock("../hooks/useApproval", () => ({
 }));
 
 vi.mock("../hooks/useTransactionHistory", () => ({
-    useTransactionHistory: () => ({ entries: [], addEntry: vi.fn(), clearHistory: vi.fn() }),
+    useTransactionHistory: () => ({ entries: [], addEntry: vi.fn(), isLoading: false, refetch: vi.fn() }),
 }));
 
 vi.mock("../hooks/useToken", () => ({
@@ -113,33 +113,15 @@ vi.mock("../hooks/useToken", () => ({
 }));
 
 vi.mock("../hooks/useSwapQuote", () => ({
-    useSwapQuote: (args: { tokenIn?: TokenInfo; tokenOut?: TokenInfo; amount: string; slippageBps: number; quoteMode?: "exactIn" | "exactOut" }) => {
-        const quoteMode = args.quoteMode ?? "exactIn";
+    useSwapQuote: (args: { tokenIn?: TokenInfo; tokenOut?: TokenInfo; amount: string; slippageBps: number }) => {
         const baseQuote = { routes: [], selectedRouteIndex: 0, setSelectedRouteIndex: vi.fn(), refetch: vi.fn(), updatedAt: QUOTE_UPDATED_AT };
-        const parsedAmount = quoteMode === "exactOut"
-            ? args.tokenOut ? parseAmount(args.amount, args.tokenOut.decimals) : undefined
-            : args.tokenIn ? parseAmount(args.amount, args.tokenIn.decimals) : undefined;
+        const parsedAmount = args.tokenIn ? parseAmount(args.amount, args.tokenIn.decimals) : undefined;
         if (!args.tokenIn || !args.tokenOut || !parsedAmount) return { ...baseQuote, updatedAt: undefined, isLoading: false };
-        if (mock.state.quoteMode === "loading") {
-            return quoteMode === "exactOut"
-                ? { ...baseQuote, updatedAt: undefined, amountOut: parsedAmount, isLoading: true }
-                : { ...baseQuote, updatedAt: undefined, amountIn: parsedAmount, isLoading: true };
-        }
-        if (mock.state.quoteMode === "error") {
-            return quoteMode === "exactOut"
-                ? { ...baseQuote, updatedAt: undefined, amountOut: parsedAmount, isLoading: false, error: "No route" }
-                : { ...baseQuote, updatedAt: undefined, amountIn: parsedAmount, isLoading: false, error: "No route" };
-        }
+        if (mock.state.quoteMode === "loading") return { ...baseQuote, updatedAt: undefined, amountIn: parsedAmount, isLoading: true };
+        if (mock.state.quoteMode === "error") return { ...baseQuote, updatedAt: undefined, amountIn: parsedAmount, isLoading: false, error: "No route" };
         if (mock.state.quoteMode === "empty") return { ...baseQuote, updatedAt: undefined, isLoading: false };
 
         const slippageBps = BigInt(Math.min(9_900, Math.max(0, Math.round(args.slippageBps))));
-        if (quoteMode === "exactOut") {
-            const amountOut = parsedAmount;
-            const amountIn = amountOut / 2n;
-            const amountInMax = (amountIn * (10_000n + slippageBps) + 9_999n) / 10_000n;
-            return { ...baseQuote, amountIn, amountOut, amountInMax, rate: "2", isLoading: false };
-        }
-
         const amountIn = parsedAmount;
         const amountOut = amountIn * 2n;
         const amountOutMin = (amountOut * (10_000n - slippageBps)) / 10_000n;
@@ -224,7 +206,7 @@ describe("SwapCard", () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        const input = screen.getByLabelText("You pay");
+        const input = screen.getByLabelText("Sell");
         await user.type(input, "1.25");
 
         expect(input).toHaveValue("1.25");
@@ -234,7 +216,7 @@ describe("SwapCard", () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        const input = screen.getByLabelText("You pay");
+        const input = screen.getByLabelText("Sell");
         await user.type(input, "1a2..3e-4");
 
         expect(input).toHaveValue("12.34");
@@ -244,25 +226,25 @@ describe("SwapCard", () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        await user.click(screen.getByRole("button", { name: "Select pay token" }));
-        const dialog = screen.getByRole("dialog", { name: "Select pay token" });
-        const input = within(dialog).getByLabelText("Search by token or address");
+        await user.click(screen.getByRole("button", { name: "Select Sell token" }));
+        const dialog = screen.getByRole("dialog", { name: "Select a token" });
+        const input = within(dialog).getByLabelText("Search token or address");
 
         await user.clear(input);
         await user.type(input, TOKEN_C);
-        await user.click(within(dialog).getByRole("button", { name: "Done" }));
+        await user.click(within(dialog).getByRole("option", { name: /TKNC/ }));
 
-        expect(screen.getByRole("button", { name: "Select pay token" })).toHaveTextContent("TKNC");
+        expect(screen.getByRole("button", { name: "Select Sell token" })).toHaveTextContent("TKNC");
     });
 
     it("switches pay and receive token direction", async () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        await user.click(screen.getByRole("button", { name: "Switch pay and receive tokens" }));
+        await user.click(screen.getByRole("button", { name: "Switch tokens" }));
 
-        expect(screen.getByRole("button", { name: "Select pay token" })).toHaveTextContent("TKNB");
-        expect(screen.getByRole("button", { name: "Select receive token" })).toHaveTextContent("TKNA");
+        expect(screen.getByRole("button", { name: "Select Sell token" })).toHaveTextContent("TKNB");
+        expect(screen.getByRole("button", { name: "Select Buy token" })).toHaveTextContent("TKNA");
     });
 
     it("shows insufficient balance state", async () => {
@@ -275,7 +257,7 @@ describe("SwapCard", () => {
             },
         });
 
-        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.type(screen.getByLabelText("Sell"), "1");
 
         expect(screen.getByRole("button", { name: "Insufficient balance" })).toBeDisabled();
     });
@@ -297,7 +279,7 @@ describe("SwapCard", () => {
         const user = userEvent.setup();
         renderConfigured({ quoteMode: "loading" });
 
-        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.type(screen.getByLabelText("Sell"), "1");
 
         expect(screen.getByRole("status")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Fetching quote" })).toBeDisabled();
@@ -307,7 +289,7 @@ describe("SwapCard", () => {
         const user = userEvent.setup();
         renderConfigured({ quoteMode: "error" });
 
-        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.type(screen.getByLabelText("Sell"), "1");
 
         expect(screen.getByRole("alert")).toHaveTextContent("Quote failed");
         expect(screen.getByRole("button", { name: "Route unavailable" })).toBeDisabled();
@@ -323,7 +305,7 @@ describe("SwapCard", () => {
             },
         });
 
-        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Approve TKNA" }));
 
         await waitFor(() => expect(mock.state.approve).toHaveBeenCalledTimes(1));
@@ -334,28 +316,10 @@ describe("SwapCard", () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Swap" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
-    });
-
-    it("submits exact-output token swaps with swapTokensForExactTokens", async () => {
-        const user = userEvent.setup();
-        renderConfigured();
-
-        await user.click(screen.getByRole("button", { name: "Exact out" }));
-        await user.type(screen.getByLabelText("You receive"), "2");
-
-        expect(screen.getByLabelText("You pay")).toHaveValue("1");
-
-        await user.click(screen.getByRole("button", { name: "Swap" }));
-
-        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
-        const request = mock.state.writeContractAsync.mock.calls[0][0];
-        expect(request).toEqual(expect.objectContaining({ functionName: "swapTokensForExactTokens" }));
-        expect(request.args[0]).toBe(units("2"));
-        expect(request.args[1]).toBe(units("1.005"));
     });
 
     it("submits native ETH input swaps with swapExactETHForTokens", async () => {
@@ -367,7 +331,7 @@ describe("SwapCard", () => {
 
         render(<SwapCard />);
 
-        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Swap" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
@@ -385,7 +349,7 @@ describe("SwapCard", () => {
 
         render(<SwapCard />);
 
-        await user.type(screen.getByLabelText("You pay"), "1");
+        await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Swap" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));

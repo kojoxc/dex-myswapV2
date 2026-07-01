@@ -84,7 +84,7 @@ export function Dialog({ open, title, children, onClose }: DialogProps) {
                 aria-modal="true"
                 aria-labelledby="dialog-title"
                 tabIndex={-1}
-                className="relative z-10 max-h-[86vh] w-full overflow-y-auto rounded-t-[1.5rem] border border-white/10 bg-[#101624] p-5 text-white shadow-[0_24px_90px_rgba(0,0,0,0.55)] outline-none sm:max-w-md sm:rounded-[1.5rem]"
+                className="relative z-10 max-h-[86vh] w-full overflow-y-auto rounded-t-lg border border-white/10 surface-card p-5 text-primary outline-none sm:max-w-md sm:rounded-lg"
             >
                 <div className="mb-5 flex items-center justify-between gap-4">
                     <h2 id="dialog-title" className="text-lg font-black tracking-tight">
@@ -94,7 +94,7 @@ export function Dialog({ open, title, children, onClose }: DialogProps) {
                         type="button"
                         aria-label="Close dialog"
                         onClick={onClose}
-                        className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-slate-300 transition hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        className="grid h-9 w-9 place-items-center rounded-lg surface-elevated text-muted transition duration-150 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
                     >
                         x
                     </button>

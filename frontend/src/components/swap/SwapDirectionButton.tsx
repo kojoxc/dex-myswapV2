@@ -3,18 +3,25 @@ type SwapDirectionButtonProps = {
     onClick: () => void;
 };
 
+function ArrowUpDownIcon() {
+    return (
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M7 3v12m0 0-3.5-3.5M7 15l3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M13 17V5m0 0L9.5 8.5M13 5l3.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
 export function SwapDirectionButton({ disabled, onClick }: SwapDirectionButtonProps) {
     return (
-        <div className="relative z-10 -my-3 flex min-w-0 max-w-full justify-center">
-            <button
-                type="button"
-                aria-label="Switch pay and receive tokens"
-                disabled={disabled}
-                onClick={onClick}
-                className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-[#101624] text-lg font-black text-slate-200 shadow-xl transition hover:scale-105 hover:border-pink-300/50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-            >
-                ↓
-            </button>
-        </div>
+        <button
+            type="button"
+            aria-label="Switch tokens"
+            disabled={disabled}
+            onClick={onClick}
+            className="token-switch-button"
+        >
+            <ArrowUpDownIcon />
+        </button>
     );
 }
