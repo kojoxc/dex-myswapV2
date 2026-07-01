@@ -5,9 +5,10 @@ import {IERC20} from "../interfaces/IERC20.sol";
 import {IUniswapV2Factory} from "../interfaces/IUniswapV2Factory.sol";
 import {IUniswapV2Pair} from "../interfaces/IUniswapV2Pair.sol";
 import {IWETH} from "../interfaces/IWETH.sol";
+import {Multicall} from "./Multicall.sol";
 import {UniswapV2Library} from "./UniswapV2Library.sol";
 
-contract UniswapV2Router02 {
+contract UniswapV2Router02 is Multicall {
     address public immutable factory;
     address public immutable WETH;
 

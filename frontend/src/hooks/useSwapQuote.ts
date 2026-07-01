@@ -17,6 +17,7 @@ type UseSwapQuoteResult = {
     amountIn?: bigint;
     amountOut?: bigint;
     amountOutMin?: bigint;
+    amountInMax?: bigint;
     rate?: string;
     path?: Address[];
     routeLabel?: string;
@@ -36,6 +37,7 @@ export function useSwapQuote(args: {
     intermediateToken?: TokenInfo;
     amount: string;
     slippageBps: number;
+    quoteType?: "exactIn" | "exactOut";
 }): UseSwapQuoteResult {
     const publicClient = usePublicClient();
     const [routes, setRoutes] = useState<RouteInfo[]>([]);
@@ -45,14 +47,17 @@ export function useSwapQuote(args: {
     const [updatedAt, setUpdatedAt] = useState<number>();
     const [refreshNonce, setRefreshNonce] = useState(0);
 
+    const isExactOutQuote = args.quoteType === "exactOut";
+
     const parsedAmount = useMemo(() => {
-        if (!args.tokenIn || !args.amount || Number(args.amount) <= 0) return undefined;
+        const token = isExactOutQuote ? args.tokenOut : args.tokenIn;
+        if (!token || !args.amount || Number(args.amount) <= 0) return undefined;
         try {
-            return parseUnits(args.amount, args.tokenIn.decimals);
+            return parseUnits(args.amount, token.decimals);
         } catch {
             return undefined;
         }
-    }, [args.amount, args.tokenIn]);
+    }, [args.amount, args.tokenIn, args.tokenOut, isExactOutQuote]);
 
     useEffect(() => {
         let cancelled = false;
@@ -71,15 +76,26 @@ export function useSwapQuote(args: {
             setIsLoading(true);
 
             try {
-                async function quotePath(nextPath: Address[]) {
-                    const amounts = await publicClient!.readContract({
-                        address: args.routerAddress as Address,
-                        abi: routerAbi,
-                        functionName: "getAmountsOut",
-                        args: [parsedAmount!, nextPath],
-                    });
+                const isExactOut = args.quoteType === "exactOut";
 
-                    return { nextPath, input: parsedAmount!, output: amounts[amounts.length - 1] };
+                async function quotePath(nextPath: Address[]) {
+                    if (isExactOut) {
+                        const amounts = await publicClient!.readContract({
+                            address: args.routerAddress as Address,
+                            abi: routerAbi,
+                            functionName: "getAmountsIn",
+                            args: [parsedAmount!, nextPath],
+                        });
+                        return { nextPath, input: amounts[0], output: parsedAmount! };
+                    } else {
+                        const amounts = await publicClient!.readContract({
+                            address: args.routerAddress as Address,
+                            abi: routerAbi,
+                            functionName: "getAmountsOut",
+                            args: [parsedAmount!, nextPath],
+                        });
+                        return { nextPath, input: parsedAmount!, output: amounts[amounts.length - 1] };
+                    }
                 }
 
                 const wethAddress = args.intermediateToken?.address;
@@ -140,7 +156,7 @@ export function useSwapQuote(args: {
         return () => {
             cancelled = true;
         };
-    }, [parsedAmount, args.intermediateToken, args.routerAddress, args.tokenIn, args.tokenOut, publicClient, refreshNonce]);
+    }, [parsedAmount, args.intermediateToken, args.routerAddress, args.tokenIn, args.tokenOut, publicClient, refreshNonce, args.quoteType]);
 
     const selectedRoute = routes[selectedRouteIndex] ?? routes[0];
     const effectiveRouteIndex = selectedRoute ? selectedRouteIndex : 0;
@@ -150,7 +166,8 @@ export function useSwapQuote(args: {
     const path = selectedRoute?.path;
 
     const slippageBps = Number.isFinite(args.slippageBps) ? Math.min(9_900, Math.max(0, Math.round(args.slippageBps))) : 50;
-    const amountOutMin = amountOut !== undefined ? (amountOut * BigInt(10_000 - slippageBps)) / 10_000n : undefined;
+    const amountOutMin = !isExactOutQuote && amountOut !== undefined ? (amountOut * BigInt(10_000 - slippageBps)) / 10_000n : undefined;
+    const amountInMax = isExactOutQuote && amountIn !== undefined ? (amountIn * BigInt(10_000 + slippageBps)) / 10_000n : undefined;
     const rate = amountOut && amountIn && args.tokenIn && args.tokenOut
         ? (Number(formatUnits(amountOut, args.tokenOut.decimals)) / Number(formatUnits(amountIn, args.tokenIn.decimals))).toLocaleString(undefined, {
               maximumFractionDigits: 8,
@@ -163,6 +180,7 @@ export function useSwapQuote(args: {
         amountIn,
         amountOut,
         amountOutMin,
+        amountInMax,
         rate,
         path,
         routeLabel,

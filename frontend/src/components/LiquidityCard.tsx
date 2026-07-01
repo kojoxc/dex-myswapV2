@@ -14,8 +14,8 @@ import { useTokenList } from "../hooks/useTokenList";
 import { useTransactionHistory, type HistoryEntry } from "../hooks/useTransactionHistory";
 import { sanitizeAmountInput } from "../lib/amountInput";
 import { normalizeTransactionError } from "../lib/errors";
-import { compactAddress, formatDisplayAmount, formatTokenAmount } from "../lib/format";
-import { getWethAddress, isNativeAddress, NATIVE_ETH_ADDRESS } from "../lib/tokenRegistry";
+import { compactAddress, formatDisplayAmount, formatPercentBps, formatTokenAmount } from "../lib/format";
+import { getWethAddress, isNativeAddress } from "../lib/tokenRegistry";
 import {
     DEFAULT_DEADLINE_MINUTES,
     DEFAULT_ROUTER_ADDRESS,
@@ -74,13 +74,6 @@ function sqrtBigInt(value: bigint) {
     }
 
     return x0;
-}
-
-function formatPercentBps(value?: bigint) {
-    if (value === undefined) return "-";
-    const whole = value / 100n;
-    const fraction = (value % 100n).toString().padStart(2, "0").replace(/0+$/, "");
-    return fraction ? `${whole}.${fraction}%` : `${whole}%`;
 }
 
 function quoteLiquidityAmount(input?: bigint, reserveIn?: bigint, reserveOut?: bigint) {
@@ -460,8 +453,7 @@ export function LiquidityCard({ defaultMode = "add", historyEntries: extHistoryE
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 if (receipt.status !== "success") throw new Error("Approval transaction reverted");
                 tokenA.refetch();
-                setTx({ title: "Approve confirmed", status: "success", hash, message: `${tokenA.token.symbol} allowance updated. Add liquidity again.` });
-                return;
+                if (pair.pairAddress) lpToken.refetch();
             }
 
             if (needsTokenBApproval) {
@@ -471,8 +463,6 @@ export function LiquidityCard({ defaultMode = "add", historyEntries: extHistoryE
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 if (receipt.status !== "success") throw new Error("Approval transaction reverted");
                 tokenB.refetch();
-                setTx({ title: "Approve confirmed", status: "success", hash, message: `${tokenB.token.symbol} allowance updated. Add liquidity again.` });
-                return;
             }
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + deadlineMinutes * 60);
@@ -534,8 +524,6 @@ export function LiquidityCard({ defaultMode = "add", historyEntries: extHistoryE
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 if (receipt.status !== "success") throw new Error("Approval transaction reverted");
                 lpToken.refetch();
-                setTx({ title: "Approve confirmed", status: "success", hash, message: "LP allowance updated. Remove liquidity again." });
-                return;
             }
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + deadlineMinutes * 60);

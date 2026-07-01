@@ -29,7 +29,7 @@ function RoutePill({ route, selected, onClick }: { route: RouteInfo; selected: b
             onClick={onClick}
             className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
                 selected ? "bg-pink-500/20 text-pink-100" : "bg-white/[0.06] text-slate-400 hover:text-slate-200"
-            }`}
+            } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300`}
         >
             {route.label}
         </button>

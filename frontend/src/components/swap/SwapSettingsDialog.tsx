@@ -44,7 +44,7 @@ function ContractInput({ label, value, placeholder, isValid, onChange }: Contrac
                 spellCheck={false}
                 aria-label={label}
                 aria-invalid={!isValid}
-                className="rounded-lg surface-input px-4 py-3 text-sm text-primary outline-none placeholder:text-slate-600 focus:border-pink-300 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-pink-300"
+                className="rounded-lg surface-input px-4 py-3 text-sm text-primary outline-none placeholder:text-slate-600 focus:border-white/20"
             />
         </label>
     );
@@ -102,28 +102,42 @@ export function SwapSettingsDialog(props: SwapSettingsDialogProps) {
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <label className="min-w-0 grid gap-2 text-sm font-bold text-secondary">
-                            Slippage %
-                            <input
-                                value={slippagePercent}
-                                type="number"
-                                min="0"
-                                step="0.1"
-                                onChange={(event) => props.onSlippageChange(Number(event.target.value) * 100)}
-                                aria-invalid={hasHighSlippage}
-                                className="w-full min-w-0 rounded-lg surface-input px-4 py-3 text-primary outline-none focus:border-pink-300 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-pink-300"
-                            />
+                                Slippage %
+                                <div className="flex gap-2">
+                                    {[0.1, 0.5, 1.0].map((preset) => (
+                                        <button
+                                            key={preset}
+                                            type="button"
+                                            onClick={() => props.onSlippageChange(preset * 100)}
+                                            className={`min-h-[38px] flex-1 rounded-lg border px-3 text-xs font-bold transition ${
+                                                slippagePercent === preset ? "border-pink-400/50 bg-pink-400/10 text-pink-200" : "border-white/10 bg-white/[0.04] text-secondary hover:bg-white/[0.08]"
+                                            }`}
+                                        >
+                                            {preset}%
+                                        </button>
+                                    ))}
+                                </div>
+                                <input
+                                    value={slippagePercent}
+                                    type="number"
+                                    min="0"
+                                    step="0.1"
+                                    onChange={(event) => props.onSlippageChange(Number(event.target.value) * 100)}
+                                    aria-invalid={hasHighSlippage}
+                                    className="w-full min-w-0 rounded-lg surface-input px-4 py-3 text-primary outline-none focus:border-white/20"
+                                />
                         </label>
 
                         <label className="min-w-0 grid gap-2 text-sm font-bold text-secondary">
-                            Deadline min
-                            <input
-                                value={props.deadlineMinutes}
-                                type="number"
-                                min="1"
-                                step="1"
-                                onChange={(event) => props.onDeadlineChange(Number(event.target.value))}
-                                className="w-full min-w-0 rounded-lg surface-input px-4 py-3 text-primary outline-none focus:border-pink-300 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-pink-300"
-                            />
+                                Deadline min
+                                <input
+                                    value={props.deadlineMinutes}
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    onChange={(event) => props.onDeadlineChange(Number(event.target.value))}
+                                    className="w-full min-w-0 rounded-lg surface-input px-4 py-3 text-primary outline-none focus:border-white/20"
+                                />
                         </label>
                     </div>
 

@@ -12,8 +12,8 @@ import { useToken } from "../hooks/useToken";
 import { useTokenList } from "../hooks/useTokenList";
 import { useTransactionHistory } from "../hooks/useTransactionHistory";
 import { normalizeTransactionError } from "../lib/errors";
-import { formatDisplayAmount, formatTokenAmount } from "../lib/format";
-import { getWethAddress, isNativeAddress, NATIVE_ETH_ADDRESS } from "../lib/tokenRegistry";
+import { formatDisplayAmount, formatPercentBps, formatTokenAmount } from "../lib/format";
+import { getWethAddress, isNativeAddress } from "../lib/tokenRegistry";
 import {
     DEFAULT_DEADLINE_MINUTES,
     DEFAULT_ROUTER_ADDRESS,
@@ -30,19 +30,13 @@ import type { HistoryEntry } from "../hooks/useTransactionHistory";
 import type { TransactionState } from "../types";
 import { QuoteDetails } from "./swap/QuoteDetails";
 import { SwapActionButton } from "./swap/SwapActionButton";
+import { SwapConfirmDialog } from "./swap/SwapConfirmDialog";
 import { SwapDirectionButton } from "./swap/SwapDirectionButton";
 import { SwapHistory } from "./SwapHistory";
 import { SwapSettingsDialog } from "./swap/SwapSettingsDialog";
 import { TokenAmountPanel } from "./swap/TokenAmountPanel";
 import { TokenSelectorDialog } from "./swap/TokenSelectorDialog";
 import { TransactionToast } from "./TransactionToast";
-
-function formatPercentBps(value?: bigint) {
-    if (value === undefined) return "-";
-    const whole = value / 100n;
-    const fraction = (value % 100n).toString().padStart(2, "0").replace(/0+$/, "");
-    return fraction ? `${whole}.${fraction}%` : `${whole}%`;
-}
 
 function resolveAddress(address: string, weth: Address | undefined): Address {
     if (isNativeAddress(address) && weth) return weth;
@@ -71,6 +65,7 @@ export function SwapCard({ historyEntries: extHistoryEntries, onAddHistoryEntry:
     const [tx, setTx] = useState<TransactionState>({ title: "", status: "idle" });
     const [isConfirming, setIsConfirming] = useState(false);
     const [isRefreshingQuote, setIsRefreshingQuote] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
     const [now, setNow] = useState(() => Date.now());
     const internalHistory = useTransactionHistory();
     const historyEntries = extHistoryEntries ?? internalHistory.entries;
@@ -118,8 +113,8 @@ export function SwapCard({ historyEntries: extHistoryEntries, onAddHistoryEntry:
     const hasValidTokenOutAddress = isAddress(tokenOutAddress) || tokenOutIsNative;
     const hasNativeRouteWeth = !(tokenInIsNative || tokenOutIsNative) || Boolean(wethAddress);
     const routeSetupComplete = hasValidRouter && hasValidTokenInAddress && hasValidTokenOutAddress && hasNativeRouteWeth && !(tokenInIsNative && tokenOutIsNative);
-    const hasTypedAmount = quote.amountIn !== undefined && quote.amountIn > 0n;
-    const hasQuotedAmount = quote.amountIn !== undefined && quote.amountIn > 0n && quote.amountOut !== undefined && quote.amountOut > 0n;
+    const hasTypedAmount = Boolean(quote.amountIn !== undefined && quote.amountIn > 0n);
+    const hasQuotedAmount = Boolean(quote.amountIn !== undefined && quote.amountIn > 0n && quote.amountOut !== undefined && quote.amountOut > 0n);
     const hasInsufficientBalance = Boolean(isConnected && quote.amountIn !== undefined && tokenIn.balance !== undefined && tokenIn.balance < quote.amountIn);
     const isBusy = isApproving || isSwapPending || isConfirming;
 
@@ -260,8 +255,7 @@ export function SwapCard({ historyEntries: extHistoryEntries, onAddHistoryEntry:
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 if (receipt.status !== "success") throw new Error("Approval transaction reverted");
                 tokenIn.refetch();
-                setTx({ title: "Approve confirmed", status: "success", hash, message: `${tokenIn.token.symbol} allowance updated. You can swap now.` });
-                return;
+                quote.refetch();
             }
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + deadlineMinutes * 60);
@@ -329,7 +323,12 @@ export function SwapCard({ historyEntries: extHistoryEntries, onAddHistoryEntry:
         }
 
         if (!canSubmit) return;
-        void submit();
+
+        if (needsApproval) {
+            void submit();
+        } else {
+            setShowConfirm(true);
+        }
     }
 
     function handleActionButtonClick() {
@@ -359,14 +358,16 @@ export function SwapCard({ historyEntries: extHistoryEntries, onAddHistoryEntry:
                         <h1 className="font-black tracking-tight text-primary">Swap</h1>
                         <p className="mt-0.5 text-sm text-secondary">Trade tokens instantly</p>
                     </div>
-                    <button
-                        type="button"
-                        aria-label="Open swap settings"
-                        onClick={() => setIsSettingsOpen(true)}
-                        className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg surface-elevated text-sm text-muted transition duration-150 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-                    >
-                        ⚙
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            aria-label="Open swap settings"
+                            onClick={() => setIsSettingsOpen(true)}
+                            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg surface-elevated text-sm text-muted transition duration-150 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
+                        >
+                            ⚙
+                        </button>
+                    </div>
                 </div>
 
                 <div className="token-panels min-w-0 max-w-full">
@@ -492,6 +493,23 @@ export function SwapCard({ historyEntries: extHistoryEntries, onAddHistoryEntry:
             />
 
             <TransactionToast tx={tx} />
+
+            <SwapConfirmDialog
+                open={showConfirm}
+                sellAmount={amount}
+                sellSymbol={tokenIn.token?.symbol ?? ""}
+                buyAmount={quote.amountOut && tokenOut.token ? formatDisplayAmount(formatTokenAmount(quote.amountOut, tokenOut.token.decimals, 8)) : ""}
+                buySymbol={tokenOut.token?.symbol ?? ""}
+                priceImpact={formatPercentBps(priceImpactBps)}
+                minimumReceived={quote.amountOutMin && tokenOut.token ? `Min: ${formatDisplayAmount(formatTokenAmount(quote.amountOutMin, tokenOut.token.decimals, 6))} ${tokenOut.token.symbol}` : "-"}
+                route={routeLabel}
+                slippage={`${(slippageBps / 100).toFixed(1)}%`}
+                onConfirm={() => {
+                    setShowConfirm(false);
+                    void submit();
+                }}
+                onClose={() => setShowConfirm(false)}
+            />
 
             {!extHistoryEntries ? <SwapHistory entries={historyEntries} /> : null}
         </>

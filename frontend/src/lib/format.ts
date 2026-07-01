@@ -18,6 +18,13 @@ export function safeNumber(value: string) {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
+export function formatPercentBps(value?: bigint): string {
+    if (value === undefined) return "-";
+    const whole = value / 100n;
+    const fraction = (value % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+    return fraction ? `${whole}.${fraction}%` : `${whole}%`;
+}
+
 export function formatDisplayAmount(value: string | undefined, maxDecimals = 6): string {
     if (!value || value === "") return "";
     const cleaned = value.replace(/[,\s]/g, "");

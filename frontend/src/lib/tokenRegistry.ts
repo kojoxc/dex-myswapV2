@@ -49,6 +49,7 @@ export const SUPPORTED_TOKENS: Record<number, SupportedToken[]> = {
     ],
     31337: [
         { type: "native", chainId: 31337, address: null, name: "Ethereum", symbol: "ETH", decimals: 18 },
+        { type: "erc20", chainId: 31337, address: "0x5FbDB2315678afecb367f032d93F642f64180aa3", name: "Wrapped Ether", symbol: "WETH", decimals: 18 },
     ],
 };
 

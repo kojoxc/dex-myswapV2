@@ -308,8 +308,9 @@ describe("SwapCard", () => {
         await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Approve TKNA" }));
 
+        // Approval fires first, then swap auto-submits
         await waitFor(() => expect(mock.state.approve).toHaveBeenCalledTimes(1));
-        expect(mock.state.writeContractAsync).not.toHaveBeenCalled();
+        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
     });
 
     it("submits swap when allowance is sufficient", async () => {
@@ -318,6 +319,7 @@ describe("SwapCard", () => {
 
         await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Swap" }));
+        await user.click(screen.getByRole("button", { name: "Confirm swap" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
     });
@@ -333,6 +335,7 @@ describe("SwapCard", () => {
 
         await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Swap" }));
+        await user.click(screen.getByRole("button", { name: "Confirm swap" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
         const request = mock.state.writeContractAsync.mock.calls[0][0];
@@ -351,6 +354,7 @@ describe("SwapCard", () => {
 
         await user.type(screen.getByLabelText("Sell"), "1");
         await user.click(screen.getByRole("button", { name: "Swap" }));
+        await user.click(screen.getByRole("button", { name: "Confirm swap" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
         const request = mock.state.writeContractAsync.mock.calls[0][0];

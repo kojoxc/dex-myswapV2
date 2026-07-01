@@ -1523,9 +1523,8 @@ input[type="number"] {
         color: var(--text-primary);
     }
 
-    .lp-amount-input:focus-visible,
     .lp-percentage-actions button:focus-visible {
-        outline: 2px solid rgba(99, 102, 241, 0.7);
+        outline: 1px solid rgba(255, 255, 255, 0.2);
         outline-offset: 2px;
     }
 
@@ -1723,8 +1722,7 @@ input[type="number"] {
 
     .pool-search-input:focus,
     .pool-sort-select:focus-visible {
-        border-color: rgba(99, 102, 241, 0.7);
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+        border-color: rgba(255, 255, 255, 0.2);
     }
 
     .select-chevron {

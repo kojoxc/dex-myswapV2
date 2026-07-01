@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    ports:
+      - "8545:8545"
+    entrypoint: ["anvil"]
+    command:
+      [
+        "--host",
+        "0.0.0.0",
+        "--chain-id",
+        "31337",
+        "--accounts",
+        "10",
+        "--balance",
+        "10000",
+      ]
+
+
+  deploy:
+    image: ghcr.io/foundry-rs/foundry:latest
+    depends_on:
+      anvil:
+        condition: service_started
+    volumes:
+      - .:/app
+    working_dir: /app
+    entrypoint: ["sh", "-c"]
+    command:
+      [
+        "until cast block-number --rpc-url http://anvil:8545; do sleep 2; done && forge script script/DeployLocal.s.sol --rpc-url http://anvil:8545 --broadcast --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+      ]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_RPC_URL=http://anvil:8545
+    ports:
+      - "5173:80"
+    depends_on:
+      deploy:
+        condition: service_completed_successfully

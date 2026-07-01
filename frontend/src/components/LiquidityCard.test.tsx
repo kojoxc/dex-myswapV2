@@ -265,7 +265,7 @@ describe("LiquidityCard", () => {
         expect(request.args[0]).toBe(TOKEN_B);
     });
 
-    it("submits token approval before adding liquidity", async () => {
+    it("submits token approval and auto-submits add liquidity", async () => {
         const user = userEvent.setup();
         renderConfigured({
             tokenResults: {
@@ -280,7 +280,8 @@ describe("LiquidityCard", () => {
         await user.click(screen.getByRole("button", { name: "Approve TKNA" }));
 
         await waitFor(() => expect(mock.state.approve).toHaveBeenCalledTimes(1));
-        expect(mock.state.writeContractAsync).not.toHaveBeenCalled();
+        await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
+        expect(mock.state.writeContractAsync).toHaveBeenCalledWith(expect.objectContaining({ functionName: "addLiquidity" }));
     });
 
     it("submits remove liquidity from LP amount without checklist", async () => {

@@ -233,6 +233,13 @@ export const routerAbi = [
         ],
         outputs: [{ name: "amounts", type: "uint256[]" }],
     },
+    {
+        type: "function",
+        name: "multicall",
+        stateMutability: "nonpayable",
+        inputs: [{ name: "data", type: "bytes[]" }],
+        outputs: [{ name: "results", type: "bytes[]" }],
+    },
 ] as const;
 
 export const factoryAbi = [

@@ -8,6 +8,7 @@ import ReactDOM from "react-dom/client";
 import { WagmiProvider } from "wagmi";
 
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { wagmiConfig } from "./config/wagmi";
 
 const queryClient = new QueryClient();
@@ -26,7 +27,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                         overlayBlur: "small",
                     })}
                 >
-                    <App />
+                    <ErrorBoundary><App /></ErrorBoundary>
                 </RainbowKitProvider>
             </QueryClientProvider>
         </WagmiProvider>
