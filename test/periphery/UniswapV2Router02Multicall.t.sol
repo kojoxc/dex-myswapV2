@@ -37,16 +37,7 @@ contract UniswapV2Router02MulticallTest is Test {
         vm.startPrank(alice);
         tokenA.approve(address(router), type(uint256).max);
         tokenB.approve(address(router), type(uint256).max);
-        router.addLiquidity(
-            address(tokenA),
-            address(tokenB),
-            10 ether,
-            10 ether,
-            0,
-            0,
-            alice,
-            block.timestamp
-        );
+        router.addLiquidity(address(tokenA), address(tokenB), 10 ether, 10 ether, 0, 0, alice, block.timestamp);
         vm.stopPrank();
     }
 
@@ -66,12 +57,7 @@ contract UniswapV2Router02MulticallTest is Test {
         );
 
         calls[1] = abi.encodeWithSelector(
-            router.swapExactTokensForTokens.selector,
-            1 ether,
-            0,
-            _directPath(),
-            alice,
-            block.timestamp
+            router.swapExactTokensForTokens.selector, 1 ether, 0, _directPath(), alice, block.timestamp
         );
 
         vm.prank(alice);
@@ -85,12 +71,7 @@ contract UniswapV2Router02MulticallTest is Test {
 
         // swap with 0 amount — invalid, should revert
         calls[0] = abi.encodeWithSelector(
-            router.swapExactTokensForTokens.selector,
-            0,
-            0,
-            _directPath(),
-            alice,
-            block.timestamp
+            router.swapExactTokensForTokens.selector, 0, 0, _directPath(), alice, block.timestamp
         );
 
         vm.expectRevert();
@@ -106,14 +87,7 @@ contract UniswapV2Router02MulticallTest is Test {
 
         bytes[] memory calls = new bytes[](1);
         calls[0] = abi.encodeWithSelector(
-            router.removeLiquidity.selector,
-            address(tokenA),
-            address(tokenB),
-            lpBalance,
-            0,
-            0,
-            alice,
-            block.timestamp
+            router.removeLiquidity.selector, address(tokenA), address(tokenB), lpBalance, 0, 0, alice, block.timestamp
         );
 
         vm.prank(alice);
