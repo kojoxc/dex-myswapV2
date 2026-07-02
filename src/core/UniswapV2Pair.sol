@@ -8,6 +8,7 @@ import {UQ112x112} from "../libraries/UQ112x112.sol";
 import {IERC20} from "../interfaces/IERC20.sol";
 import {IUniswapV2Factory} from "../interfaces/IUniswapV2Factory.sol";
 import {IUniswapV2Callee} from "../interfaces/IUniswapV2Callee.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
     using UQ112x112 for uint224;
@@ -31,7 +32,7 @@ contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
     uint256 private unlocked = 1;
 
     modifier lock() {
-        require(unlocked == 1, "UniswapV2: LOCKED");
+        if (unlocked != 1) revert Errors.PairLocked();
         unlocked = 0;
         _;
         unlocked = 1;
@@ -53,25 +54,25 @@ contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
     }
 
     function initialize(address _token0, address _token1) external override {
-        require(msg.sender == factory, "UniswapV2: FORBIDDEN");
-        require(token0 == address(0) && token1 == address(0), "UniswapV2: ALREADY_INITIALIZED");
-        require(_token0 != address(0) && _token1 != address(0), "UniswapV2: ZERO_ADDRESS");
-        require(_token0 != _token1, "UniswapV2: IDENTICAL_ADDRESSES");
+        if (msg.sender != factory) revert Errors.PairForbidden();
+        if (token0 != address(0) || token1 != address(0)) revert Errors.PairAlreadyInitialized();
+        if (_token0 == address(0) || _token1 == address(0)) revert Errors.PairZeroAddress();
+        if (_token0 == _token1) revert Errors.PairIdenticalAddresses();
 
         token0 = _token0;
         token1 = _token1;
     }
 
     function _safeTransfer(address token, address to, uint256 value) private {
-        require(token.code.length > 0, "UniswapV2: INVALID_TOKEN");
+        if (token.code.length == 0) revert Errors.PairInvalidToken();
 
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, to, value));
 
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "UniswapV2: TRANSFER_FAILED");
+        if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert Errors.PairTransferFailed();
     }
 
     function _update(uint256 balance0, uint256 balance1, uint112 _reserve0, uint112 _reserve1) private {
-        require(balance0 <= type(uint112).max && balance1 <= type(uint112).max, "UniswapV2: OVERFLOW");
+        if (balance0 > type(uint112).max || balance1 > type(uint112).max) revert Errors.PairOverflow();
 
         uint32 blockTimestamp = uint32(block.timestamp);
         uint32 timeElapsed;
@@ -139,14 +140,14 @@ contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
         amount0In = balance0 > expectedBalance0 ? balance0 - expectedBalance0 : 0;
         amount1In = balance1 > expectedBalance1 ? balance1 - expectedBalance1 : 0;
 
-        require(amount0In > 0 || amount1In > 0, "UniswapV2: INSUFFICIENT_INPUT_AMOUNT");
+        if (amount0In == 0 && amount1In == 0) revert Errors.PairInsufficientInputAmount();
 
         uint256 balance0Adjusted = balance0 * 1_000 - amount0In * 3;
         uint256 balance1Adjusted = balance1 * 1_000 - amount1In * 3;
 
-        require(
-            balance0Adjusted * balance1Adjusted >= uint256(_reserve0) * uint256(_reserve1) * 1_000_000, "UniswapV2: K"
-        );
+        if (balance0Adjusted * balance1Adjusted < uint256(_reserve0) * uint256(_reserve1) * 1_000_000) {
+            revert Errors.PairK();
+        }
     }
 
     function mint(address to) external override lock returns (uint256 liquidity) {
@@ -174,7 +175,7 @@ contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
                 Math.min((amount0 * _totalSupply) / uint256(_reserve0), (amount1 * _totalSupply) / uint256(_reserve1));
         }
 
-        require(liquidity > 0, "UniswapV2: INSUFFICIENT_LIQUIDITY_MINTED");
+        if (liquidity == 0) revert Errors.PairInsufficientLiquidityMinted();
 
         _mint(to, liquidity);
 
@@ -205,7 +206,7 @@ contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
         amount0 = (liquidity * balance0) / _totalSupply;
         amount1 = (liquidity * balance1) / _totalSupply;
 
-        require(amount0 > 0 && amount1 > 0, "UniswapV2: INSUFFICIENT_LIQUIDITY_BURNED");
+        if (amount0 == 0 || amount1 == 0) revert Errors.PairInsufficientLiquidityBurned();
 
         _burn(address(this), liquidity);
 
@@ -225,11 +226,11 @@ contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
     }
 
     function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external override lock {
-        require(amount0Out > 0 || amount1Out > 0, "UniswapV2: INSUFFICIENT_OUTPUT_AMOUNT");
+        if (amount0Out == 0 && amount1Out == 0) revert Errors.PairInsufficientOutputAmount();
 
         (uint112 _reserve0, uint112 _reserve1,) = getReserves();
 
-        require(amount0Out < uint256(_reserve0) && amount1Out < uint256(_reserve1), "UniswapV2: INSUFFICIENT_LIQUIDITY");
+        if (amount0Out >= _reserve0 || amount1Out >= _reserve1) revert Errors.PairInsufficientLiquidity();
 
         uint256 balance0;
         uint256 balance1;
@@ -238,7 +239,7 @@ contract UniswapV2Pair is IUniswapV2Pair, UniswapV2ERC20 {
             address _token0 = token0;
             address _token1 = token1;
 
-            require(to != _token0 && to != _token1, "UniswapV2: INVALID_TO");
+            if (to == _token0 || to == _token1) revert Errors.PairInvalidTo();
 
             if (amount0Out > 0) {
                 _safeTransfer(_token0, to, amount0Out);

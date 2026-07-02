@@ -5,40 +5,61 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   solidity:
     name: Solidity
     runs-on: ubuntu-latest
+    env:
+      FOUNDRY_PROFILE: ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Show Foundry version
+      - name: Show Forge version
         run: forge --version
 
+      - name: Run Forge fmt
+        run: forge fmt --check
+
       - name: Build
-        run: forge build
+        run: forge build --sizes
 
       - name: Run tests
-        run: forge test
+        run: forge test -vvv
 
-      - name: Run coverage
-        run: forge coverage --report lcov
+      - name: Coverage
+        run: forge coverage --report summary
 
-      - name: Check gas snapshot
+      - name: Gas snapshot
         run: forge snapshot --check
+
+  slither:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install Slither
+        run: pipx install slither-analyzer
 
       - name: Run Slither
         continue-on-error: true
-        uses: crytic/slither-action@v0.4.0
-        with:
-          target: "src/"
-          slither-args: --filter-paths "lib|test|script|frontend"
+        run: slither . --filter-paths "lib|test|script|frontend"
 
   frontend:
     name: Frontend
@@ -48,13 +69,13 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: "npm"
+          node-version: 22
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies

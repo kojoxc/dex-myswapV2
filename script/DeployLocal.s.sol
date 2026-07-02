@@ -22,8 +22,8 @@ contract DeployLocalScript is Script {
         weth = new WETH9();
         factory = new UniswapV2Factory(feeToSetter);
         router = new UniswapV2Router02(address(factory), address(weth));
-        tokenA = new MockERC20("Token A", "TKNA");
-        tokenB = new MockERC20("Token B", "TKNB");
+        tokenA = new MockERC20("Token A", "TKA");
+        tokenB = new MockERC20("Token B", "TKB");
 
         tokenA.mint(initialHolder, initialSupply);
         tokenB.mint(initialHolder, initialSupply);
@@ -60,10 +60,10 @@ contract DeployLocalScript is Script {
             "  \"tokens\": [\n",
             "    { \"address\": \"",
             vm.toString(tokenA),
-            "\", \"symbol\": \"TKNA\", \"name\": \"Token A\", \"decimals\": 18 },\n",
+            "\", \"symbol\": \"TKA\", \"name\": \"Token A\", \"decimals\": 18 },\n",
             "    { \"address\": \"",
             vm.toString(tokenB),
-            "\", \"symbol\": \"TKNB\", \"name\": \"Token B\", \"decimals\": 18 }\n",
+            "\", \"symbol\": \"TKB\", \"name\": \"Token B\", \"decimals\": 18 }\n",
             "  ]\n",
             "}\n"
         );

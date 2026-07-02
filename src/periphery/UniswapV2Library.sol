@@ -1,22 +1,31 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IUniswapV2Factory} from "../interfaces/IUniswapV2Factory.sol";
 import {IUniswapV2Pair} from "../interfaces/IUniswapV2Pair.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 library UniswapV2Library {
+    bytes32 internal constant INIT_CODE_HASH = 0x5311e08a7dcc460bd1d4e478709af6abbdea236cd0a3fbd615a47b4463dd4405;
+
     function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
-        require(tokenA != tokenB, "UniswapV2Library: IDENTICAL_ADDRESSES");
+        if (tokenA == tokenB) revert Errors.LibraryIdenticalAddresses();
 
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
 
-        require(token0 != address(0), "UniswapV2Library: ZERO_ADDRESS");
+        if (token0 == address(0)) revert Errors.LibraryZeroAddress();
     }
 
-    function pairFor(address factory, address tokenA, address tokenB) internal view returns (address pair) {
+    function pairFor(address factory, address tokenA, address tokenB) internal pure returns (address pair) {
         (address token0, address token1) = sortTokens(tokenA, tokenB);
-        pair = IUniswapV2Factory(factory).getPair(token0, token1);
-        require(pair != address(0), "UniswapV2Library: PAIR_NOT_FOUND");
+        pair = address(
+            uint160(
+                uint256(
+                    keccak256(
+                        abi.encodePacked(hex"ff", factory, keccak256(abi.encodePacked(token0, token1)), INIT_CODE_HASH)
+                    )
+                )
+            )
+        );
     }
 
     function getReserves(address factory, address tokenA, address tokenB)
@@ -31,8 +40,8 @@ library UniswapV2Library {
     }
 
     function quote(uint256 amountA, uint256 reserveA, uint256 reserveB) internal pure returns (uint256 amountB) {
-        require(amountA > 0, "UniswapV2Library: INSUFFICIENT_AMOUNT");
-        require(reserveA > 0 && reserveB > 0, "UniswapV2Library: INSUFFICIENT_LIQUIDITY");
+        if (amountA == 0) revert Errors.LibraryInsufficientAmount();
+        if (reserveA == 0 || reserveB == 0) revert Errors.LibraryInsufficientLiquidity();
 
         amountB = (amountA * reserveB) / reserveA;
     }
@@ -42,8 +51,8 @@ library UniswapV2Library {
         pure
         returns (uint256 amountOut)
     {
-        require(amountIn > 0, "UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT");
-        require(reserveIn > 0 && reserveOut > 0, "UniswapV2Library: INSUFFICIENT_LIQUIDITY");
+        if (amountIn == 0) revert Errors.LibraryInsufficientInputAmount();
+        if (reserveIn == 0 || reserveOut == 0) revert Errors.LibraryInsufficientLiquidity();
 
         uint256 amountInWithFee = amountIn * 997;
         uint256 numerator = amountInWithFee * reserveOut;
@@ -57,9 +66,9 @@ library UniswapV2Library {
         pure
         returns (uint256 amountIn)
     {
-        require(amountOut > 0, "UniswapV2Library: INSUFFICIENT_OUTPUT_AMOUNT");
-        require(reserveIn > 0 && reserveOut > 0, "UniswapV2Library: INSUFFICIENT_LIQUIDITY");
-        require(amountOut < reserveOut, "UniswapV2Library: INSUFFICIENT_LIQUIDITY");
+        if (amountOut == 0) revert Errors.LibraryInsufficientOutputAmount();
+        if (reserveIn == 0 || reserveOut == 0) revert Errors.LibraryInsufficientLiquidity();
+        if (amountOut >= reserveOut) revert Errors.LibraryInsufficientLiquidity();
 
         uint256 numerator = reserveIn * amountOut * 1_000;
         uint256 denominator = (reserveOut - amountOut) * 997;
@@ -72,7 +81,7 @@ library UniswapV2Library {
         view
         returns (uint256[] memory amounts)
     {
-        require(path.length >= 2, "UniswapV2Library: INVALID_PATH");
+        if (path.length < 2) revert Errors.LibraryInvalidPath();
 
         amounts = new uint256[](path.length);
         amounts[0] = amountIn;
@@ -88,7 +97,7 @@ library UniswapV2Library {
         view
         returns (uint256[] memory amounts)
     {
-        require(path.length >= 2, "UniswapV2Library: INVALID_PATH");
+        if (path.length < 2) revert Errors.LibraryInvalidPath();
 
         amounts = new uint256[](path.length);
         amounts[amounts.length - 1] = amountOut;

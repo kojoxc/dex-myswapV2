@@ -9,6 +9,7 @@ import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {WETH9} from "../../src/mocks/WETH9.sol";
 import {UniswapV2Library} from "../../src/periphery/UniswapV2Library.sol";
 import {UniswapV2Router02} from "../../src/periphery/UniswapV2Router02.sol";
+import {Errors} from "../../src/libraries/Errors.sol";
 
 contract UniswapV2Router02Test is Test {
     UniswapV2Factory internal factory;
@@ -78,7 +79,7 @@ contract UniswapV2Router02Test is Test {
 
     function testAddLiquidityRevertsWhenInitialAmountsBelowMin() public {
         vm.prank(alice);
-        vm.expectRevert(bytes("UniswapV2Router: INSUFFICIENT_A_AMOUNT"));
+        vm.expectRevert(Errors.RouterInsufficientAAmount.selector);
         router.addLiquidity(
             address(tokenA), address(tokenB), 10 ether, 20 ether, 11 ether, 20 ether, alice, block.timestamp
         );
@@ -148,11 +149,11 @@ contract UniswapV2Router02Test is Test {
         address[] memory path = _path(address(tokenA), address(tokenB));
 
         vm.prank(alice);
-        vm.expectRevert(bytes("UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT"));
+        vm.expectRevert(Errors.RouterInsufficientOutputAmount.selector);
         router.swapExactTokensForTokens(1 ether, type(uint256).max, path, alice, block.timestamp);
 
         vm.prank(alice);
-        vm.expectRevert(bytes("UniswapV2Router: EXPIRED"));
+        vm.expectRevert(Errors.RouterExpired.selector);
         router.swapExactTokensForTokens(1 ether, 0, path, alice, block.timestamp - 1);
     }
 
@@ -233,6 +234,77 @@ contract UniswapV2Router02Test is Test {
         assertEq(amounts[0], expectedAmounts[0]);
         assertEq(amounts[1], 1 ether);
         assertEq(alice.balance, aliceEthBefore + 1 ether);
+    }
+
+    function testRemoveLiquidityWithPermit() public {
+        uint256 privKey = 0xDEADBEEF;
+        address owner = vm.addr(privKey);
+
+        tokenA.mint(owner, 100 ether);
+        tokenB.mint(owner, 100 ether);
+        vm.deal(owner, 100 ether);
+
+        vm.startPrank(owner);
+        tokenA.approve(address(router), type(uint256).max);
+        tokenB.approve(address(router), type(uint256).max);
+        router.addLiquidity(address(tokenA), address(tokenB), 10 ether, 20 ether, 0, 0, owner, block.timestamp);
+        vm.stopPrank();
+
+        address pair = factory.getPair(address(tokenA), address(tokenB));
+        uint256 liquidity = IUniswapV2Pair(pair).balanceOf(owner);
+
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(privKey, owner, pair, address(router), type(uint256).max);
+
+        vm.prank(owner);
+        (uint256 amountA, uint256 amountB) = router.removeLiquidityWithPermit(
+            address(tokenA), address(tokenB), liquidity, 0, 0, owner, block.timestamp, true, v, r, s
+        );
+
+        assertGt(amountA, 0);
+        assertGt(amountB, 0);
+    }
+
+    function testRemoveLiquidityETHWithPermit() public {
+        uint256 privKey = 0xCAFEBABE;
+        address owner = vm.addr(privKey);
+
+        tokenA.mint(owner, 100 ether);
+        vm.deal(owner, 100 ether);
+
+        vm.startPrank(owner);
+        tokenA.approve(address(router), type(uint256).max);
+        (,, uint256 liquidity) =
+            router.addLiquidityETH{value: 10 ether}(address(tokenA), 20 ether, 0, 0, owner, block.timestamp);
+        vm.stopPrank();
+
+        address pair = factory.getPair(address(tokenA), address(weth));
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(privKey, owner, pair, address(router), type(uint256).max);
+
+        vm.prank(owner);
+        (uint256 amountToken, uint256 amountETH) =
+            router.removeLiquidityETHWithPermit(address(tokenA), liquidity, 0, 0, owner, block.timestamp, true, v, r, s);
+
+        assertGt(amountToken, 0);
+        assertGt(amountETH, 0);
+    }
+
+    function _signPermit(uint256 privKey, address owner, address pair, address spender, uint256 value)
+        private
+        returns (uint8 v, bytes32 r, bytes32 s)
+    {
+        uint256 nonce = IUniswapV2Pair(pair).nonces(owner);
+        bytes32 domainSeparator = IUniswapV2Pair(pair).DOMAIN_SEPARATOR();
+        bytes32 typehash = IUniswapV2Pair(pair).PERMIT_TYPEHASH();
+
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                domainSeparator,
+                keccak256(abi.encode(typehash, owner, spender, value, nonce, block.timestamp))
+            )
+        );
+
+        (v, r, s) = vm.sign(privKey, digest);
     }
 
     function _addTokenLiquidity(uint256 amountA, uint256 amountB) private returns (address pair) {

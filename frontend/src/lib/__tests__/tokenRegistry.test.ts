@@ -229,7 +229,7 @@ describe("NATIVE_ETH_ADDRESS", () => {
 
 describe("SUPPORTED_TOKENS structure", () => {
     it("each chain has at most one native token", () => {
-        for (const [chainId, tokens] of Object.entries(SUPPORTED_TOKENS)) {
+        for (const tokens of Object.values(SUPPORTED_TOKENS)) {
             const natives = tokens.filter((t) => t.type === "native");
             expect(natives.length).toBeLessThanOrEqual(1);
         }
@@ -247,7 +247,7 @@ describe("SUPPORTED_TOKENS structure", () => {
     });
 
     it("no duplicate token keys within the same chain", () => {
-        for (const [chainId, tokens] of Object.entries(SUPPORTED_TOKENS)) {
+        for (const tokens of Object.values(SUPPORTED_TOKENS)) {
             const keys = tokens.map((t) => getTokenKey(t));
             expect(new Set(keys).size).toBe(keys.length);
         }

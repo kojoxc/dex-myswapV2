@@ -38,9 +38,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_RPC_URL=http://anvil:8545
+        - VITE_RPC_URL=http://127.0.0.1:8545
     ports:
       - "5173:80"
+    volumes:
+      - ./frontend/public/deployments:/usr/share/nginx/html/deployments:ro
     depends_on:
       deploy:
         condition: service_completed_successfully

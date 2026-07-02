@@ -7,13 +7,14 @@ import {IUniswapV2Pair} from "../interfaces/IUniswapV2Pair.sol";
 import {IWETH} from "../interfaces/IWETH.sol";
 import {Multicall} from "./Multicall.sol";
 import {UniswapV2Library} from "./UniswapV2Library.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 contract UniswapV2Router02 is Multicall {
     address public immutable factory;
     address public immutable WETH;
 
     modifier ensure(uint256 deadline) {
-        require(deadline >= block.timestamp, "UniswapV2Router: EXPIRED");
+        if (deadline < block.timestamp) revert Errors.RouterExpired();
         _;
     }
 
@@ -23,7 +24,7 @@ contract UniswapV2Router02 is Multicall {
     }
 
     receive() external payable {
-        require(msg.sender == WETH, "UniswapV2Router: ETH_NOT_ACCEPTED");
+        if (msg.sender != WETH) revert Errors.RouterEthNotAccepted();
     }
 
     function quote(uint256 amountA, uint256 reserveA, uint256 reserveB) external pure returns (uint256 amountB) {
@@ -88,7 +89,7 @@ contract UniswapV2Router02 is Multicall {
         _safeTransferFrom(token, msg.sender, pair, amountToken);
 
         IWETH(WETH).deposit{value: amountETH}();
-        assert(IWETH(WETH).transfer(pair, amountETH));
+        require(IWETH(WETH).transfer(pair, amountETH), "UniswapV2Router: WETH_TRANSFER_FAILED");
 
         liquidity = IUniswapV2Pair(pair).mint(to);
 
@@ -113,8 +114,8 @@ contract UniswapV2Router02 is Multicall {
         (address token0,) = UniswapV2Library.sortTokens(tokenA, tokenB);
         (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
 
-        require(amountA >= amountAMin, "UniswapV2Router: INSUFFICIENT_A_AMOUNT");
-        require(amountB >= amountBMin, "UniswapV2Router: INSUFFICIENT_B_AMOUNT");
+        if (amountA < amountAMin) revert Errors.RouterInsufficientAAmount();
+        if (amountB < amountBMin) revert Errors.RouterInsufficientBAmount();
     }
 
     function removeLiquidityETH(
@@ -124,12 +125,27 @@ contract UniswapV2Router02 is Multicall {
         uint256 amountETHMin,
         address to,
         uint256 deadline
-    ) external ensure(deadline) returns (uint256 amountToken, uint256 amountETH) {
+    ) public ensure(deadline) returns (uint256 amountToken, uint256 amountETH) {
         (amountToken, amountETH) = removeLiquidity(
             token, WETH, liquidity, amountTokenMin, amountETHMin, address(this), deadline
         );
 
         _safeTransfer(token, to, amountToken);
+        IWETH(WETH).withdraw(amountETH);
+        _safeTransferETH(to, amountETH);
+    }
+
+    function removeLiquidityETHSupportingFeeOnTransferTokens(
+        address token,
+        uint256 liquidity,
+        uint256 amountTokenMin,
+        uint256 amountETHMin,
+        address to,
+        uint256 deadline
+    ) public ensure(deadline) returns (uint256 amountETH) {
+        (, amountETH) = removeLiquidity(token, WETH, liquidity, amountTokenMin, amountETHMin, address(this), deadline);
+
+        _safeTransfer(token, to, IERC20(token).balanceOf(address(this)));
         IWETH(WETH).withdraw(amountETH);
         _safeTransferETH(to, amountETH);
     }
@@ -142,7 +158,7 @@ contract UniswapV2Router02 is Multicall {
         uint256 deadline
     ) external ensure(deadline) returns (uint256[] memory amounts) {
         amounts = UniswapV2Library.getAmountsOut(factory, amountIn, path);
-        require(amounts[amounts.length - 1] >= amountOutMin, "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT");
+        if (amounts[amounts.length - 1] < amountOutMin) revert Errors.RouterInsufficientOutputAmount();
 
         _safeTransferFrom(path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]);
         _swap(amounts, path, to);
@@ -156,7 +172,7 @@ contract UniswapV2Router02 is Multicall {
         uint256 deadline
     ) external ensure(deadline) returns (uint256[] memory amounts) {
         amounts = UniswapV2Library.getAmountsIn(factory, amountOut, path);
-        require(amounts[0] <= amountInMax, "UniswapV2Router: EXCESSIVE_INPUT_AMOUNT");
+        if (amounts[0] > amountInMax) revert Errors.RouterExcessiveInputAmount();
 
         _safeTransferFrom(path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]);
         _swap(amounts, path, to);
@@ -168,13 +184,15 @@ contract UniswapV2Router02 is Multicall {
         ensure(deadline)
         returns (uint256[] memory amounts)
     {
-        require(path[0] == WETH, "UniswapV2Router: INVALID_PATH");
+        if (path[0] != WETH) revert Errors.RouterInvalidPath();
 
         amounts = UniswapV2Library.getAmountsOut(factory, msg.value, path);
-        require(amounts[amounts.length - 1] >= amountOutMin, "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT");
+        if (amounts[amounts.length - 1] < amountOutMin) revert Errors.RouterInsufficientOutputAmount();
 
         IWETH(WETH).deposit{value: amounts[0]}();
-        assert(IWETH(WETH).transfer(UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]));
+        if (!IWETH(WETH).transfer(UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0])) {
+            revert Errors.RouterWethTransferFailed();
+        }
 
         _swap(amounts, path, to);
     }
@@ -186,10 +204,10 @@ contract UniswapV2Router02 is Multicall {
         address to,
         uint256 deadline
     ) external ensure(deadline) returns (uint256[] memory amounts) {
-        require(path[path.length - 1] == WETH, "UniswapV2Router: INVALID_PATH");
+        if (path[path.length - 1] != WETH) revert Errors.RouterInvalidPath();
 
         amounts = UniswapV2Library.getAmountsIn(factory, amountOut, path);
-        require(amounts[0] <= amountInMax, "UniswapV2Router: EXCESSIVE_INPUT_AMOUNT");
+        if (amounts[0] > amountInMax) revert Errors.RouterExcessiveInputAmount();
 
         _safeTransferFrom(path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]);
         _swap(amounts, path, address(this));
@@ -205,10 +223,10 @@ contract UniswapV2Router02 is Multicall {
         address to,
         uint256 deadline
     ) external ensure(deadline) returns (uint256[] memory amounts) {
-        require(path[path.length - 1] == WETH, "UniswapV2Router: INVALID_PATH");
+        if (path[path.length - 1] != WETH) revert Errors.RouterInvalidPath();
 
         amounts = UniswapV2Library.getAmountsOut(factory, amountIn, path);
-        require(amounts[amounts.length - 1] >= amountOutMin, "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT");
+        if (amounts[amounts.length - 1] < amountOutMin) revert Errors.RouterInsufficientOutputAmount();
 
         _safeTransferFrom(path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]);
         _swap(amounts, path, address(this));
@@ -223,13 +241,15 @@ contract UniswapV2Router02 is Multicall {
         ensure(deadline)
         returns (uint256[] memory amounts)
     {
-        require(path[0] == WETH, "UniswapV2Router: INVALID_PATH");
+        if (path[0] != WETH) revert Errors.RouterInvalidPath();
 
         amounts = UniswapV2Library.getAmountsIn(factory, amountOut, path);
-        require(amounts[0] <= msg.value, "UniswapV2Router: EXCESSIVE_INPUT_AMOUNT");
+        if (amounts[0] > msg.value) revert Errors.RouterExcessiveInputAmount();
 
         IWETH(WETH).deposit{value: amounts[0]}();
-        assert(IWETH(WETH).transfer(UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0]));
+        if (!IWETH(WETH).transfer(UniswapV2Library.pairFor(factory, path[0], path[1]), amounts[0])) {
+            revert Errors.RouterWethTransferFailed();
+        }
 
         _swap(amounts, path, to);
 
@@ -253,23 +273,78 @@ contract UniswapV2Router02 is Multicall {
         (uint256 reserveA, uint256 reserveB) = UniswapV2Library.getReserves(factory, tokenA, tokenB);
 
         if (reserveA == 0 && reserveB == 0) {
-            require(amountADesired >= amountAMin, "UniswapV2Router: INSUFFICIENT_A_AMOUNT");
-            require(amountBDesired >= amountBMin, "UniswapV2Router: INSUFFICIENT_B_AMOUNT");
+            if (amountADesired < amountAMin) revert Errors.RouterInsufficientAAmount();
+            if (amountBDesired < amountBMin) revert Errors.RouterInsufficientBAmount();
             (amountA, amountB) = (amountADesired, amountBDesired);
         } else {
             uint256 amountBOptimal = UniswapV2Library.quote(amountADesired, reserveA, reserveB);
 
             if (amountBOptimal <= amountBDesired) {
-                require(amountBOptimal >= amountBMin, "UniswapV2Router: INSUFFICIENT_B_AMOUNT");
+                if (amountBOptimal < amountBMin) revert Errors.RouterInsufficientBAmount();
                 (amountA, amountB) = (amountADesired, amountBOptimal);
             } else {
                 uint256 amountAOptimal = UniswapV2Library.quote(amountBDesired, reserveB, reserveA);
 
-                require(amountAOptimal <= amountADesired, "UniswapV2Router: EXCESSIVE_A_AMOUNT");
-                require(amountAOptimal >= amountAMin, "UniswapV2Router: INSUFFICIENT_A_AMOUNT");
+                if (amountAOptimal > amountADesired) revert Errors.RouterExcessiveAAmount();
+                if (amountAOptimal < amountAMin) revert Errors.RouterInsufficientAAmount();
                 (amountA, amountB) = (amountAOptimal, amountBDesired);
             }
         }
+    }
+
+    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external ensure(deadline) {
+        _safeTransferFrom(path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amountIn);
+
+        uint256 balanceBefore = IERC20(path[path.length - 1]).balanceOf(to);
+        _swapSupportingFeeOnTransferTokens(path, to);
+        uint256 amountOut = IERC20(path[path.length - 1]).balanceOf(to) - balanceBefore;
+
+        require(amountOut >= amountOutMin, "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT");
+    }
+
+    function swapExactETHForTokensSupportingFeeOnTransferTokens(
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external payable ensure(deadline) {
+        require(path[0] == WETH, "UniswapV2Router: INVALID_PATH");
+
+        uint256 amountIn = msg.value;
+        IWETH(WETH).deposit{value: amountIn}();
+        require(IWETH(WETH).transfer(UniswapV2Library.pairFor(factory, path[0], path[1]), amountIn));
+
+        uint256 balanceBefore = IERC20(path[path.length - 1]).balanceOf(to);
+        _swapSupportingFeeOnTransferTokens(path, to);
+        uint256 amountOut = IERC20(path[path.length - 1]).balanceOf(to) - balanceBefore;
+
+        require(amountOut >= amountOutMin, "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT");
+    }
+
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external ensure(deadline) {
+        require(path[path.length - 1] == WETH, "UniswapV2Router: INVALID_PATH");
+
+        _safeTransferFrom(path[0], msg.sender, UniswapV2Library.pairFor(factory, path[0], path[1]), amountIn);
+
+        _swapSupportingFeeOnTransferTokens(path, address(this));
+
+        uint256 amountOut = IERC20(WETH).balanceOf(address(this));
+        require(amountOut >= amountOutMin, "UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT");
+
+        IWETH(WETH).withdraw(amountOut);
+        _safeTransferETH(to, amountOut);
     }
 
     function _swap(uint256[] memory amounts, address[] memory path, address to) private {
@@ -288,19 +363,107 @@ contract UniswapV2Router02 is Multicall {
         }
     }
 
+    function _swapSupportingFeeOnTransferTokens(address[] memory path, address to) private {
+        for (uint256 i; i < path.length - 1; i++) {
+            (address input, address output) = (path[i], path[i + 1]);
+            (address token0,) = UniswapV2Library.sortTokens(input, output);
+
+            address pair = UniswapV2Library.pairFor(factory, input, output);
+
+            uint256 amountInput;
+            uint256 amountOutput;
+
+            {
+                (uint256 reserve0, uint256 reserve1,) = IUniswapV2Pair(pair).getReserves();
+                (uint256 reserveInput, uint256 reserveOutput) =
+                    input == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
+
+                amountInput = IERC20(input).balanceOf(pair) - reserveInput;
+                amountOutput = UniswapV2Library.getAmountOut(amountInput, reserveInput, reserveOutput);
+            }
+
+            (uint256 amount0Out, uint256 amount1Out) =
+                input == token0 ? (uint256(0), amountOutput) : (amountOutput, uint256(0));
+
+            address recipient = i < path.length - 2 ? UniswapV2Library.pairFor(factory, output, path[i + 2]) : to;
+
+            IUniswapV2Pair(pair).swap(amount0Out, amount1Out, recipient, new bytes(0));
+        }
+    }
+
     function _safeTransfer(address token, address to, uint256 value) private {
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(IERC20.transfer.selector, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "UniswapV2Router: TRANSFER_FAILED");
+        if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert Errors.RouterTransferFailed();
     }
 
     function _safeTransferFrom(address token, address from, address to, uint256 value) private {
         (bool success, bytes memory data) =
             token.call(abi.encodeWithSelector(IERC20.transferFrom.selector, from, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "UniswapV2Router: TRANSFER_FROM_FAILED");
+        if (!success || (data.length > 0 && !abi.decode(data, (bool)))) revert Errors.RouterTransferFromFailed();
     }
 
     function _safeTransferETH(address to, uint256 value) private {
         (bool success,) = to.call{value: value}("");
-        require(success, "UniswapV2Router: ETH_TRANSFER_FAILED");
+        if (!success) revert Errors.RouterEthTransferFailed();
+    }
+
+    function removeLiquidityWithPermit(
+        address tokenA,
+        address tokenB,
+        uint256 liquidity,
+        uint256 amountAMin,
+        uint256 amountBMin,
+        address to,
+        uint256 deadline,
+        bool approveMax,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (uint256 amountA, uint256 amountB) {
+        address pair = UniswapV2Library.pairFor(factory, tokenA, tokenB);
+        uint256 value = approveMax ? type(uint256).max : liquidity;
+
+        IUniswapV2Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
+        (amountA, amountB) = removeLiquidity(tokenA, tokenB, liquidity, amountAMin, amountBMin, to, deadline);
+    }
+
+    function removeLiquidityETHWithPermit(
+        address token,
+        uint256 liquidity,
+        uint256 amountTokenMin,
+        uint256 amountETHMin,
+        address to,
+        uint256 deadline,
+        bool approveMax,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (uint256 amountToken, uint256 amountETH) {
+        address pair = UniswapV2Library.pairFor(factory, token, WETH);
+        uint256 value = approveMax ? type(uint256).max : liquidity;
+
+        IUniswapV2Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
+        (amountToken, amountETH) = removeLiquidityETH(token, liquidity, amountTokenMin, amountETHMin, to, deadline);
+    }
+
+    function removeLiquidityETHWithPermitSupportingFeeOnTransferTokens(
+        address token,
+        uint256 liquidity,
+        uint256 amountTokenMin,
+        uint256 amountETHMin,
+        address to,
+        uint256 deadline,
+        bool approveMax,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (uint256 amountETH) {
+        address pair = UniswapV2Library.pairFor(factory, token, WETH);
+        uint256 value = approveMax ? type(uint256).max : liquidity;
+
+        IUniswapV2Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
+        amountETH = removeLiquidityETHSupportingFeeOnTransferTokens(
+            token, liquidity, amountTokenMin, amountETHMin, to, deadline
+        );
     }
 }

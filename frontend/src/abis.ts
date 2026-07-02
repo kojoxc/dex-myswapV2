@@ -175,6 +175,20 @@ export const routerAbi = [
     },
     {
         type: "function",
+        name: "removeLiquidityETHSupportingFeeOnTransferTokens",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "token", type: "address" },
+            { name: "liquidity", type: "uint256" },
+            { name: "amountTokenMin", type: "uint256" },
+            { name: "amountETHMin", type: "uint256" },
+            { name: "to", type: "address" },
+            { name: "deadline", type: "uint256" },
+        ],
+        outputs: [{ name: "amountETH", type: "uint256" }],
+    },
+    {
+        type: "function",
         name: "getAmountsIn",
         stateMutability: "view",
         inputs: [
@@ -261,6 +275,16 @@ export const factoryAbi = [
         type: "function",
         name: "getPair",
         stateMutability: "view",
+        inputs: [
+            { name: "tokenA", type: "address" },
+            { name: "tokenB", type: "address" },
+        ],
+        outputs: [{ name: "pair", type: "address" }],
+    },
+    {
+        type: "function",
+        name: "createPair",
+        stateMutability: "nonpayable",
         inputs: [
             { name: "tokenA", type: "address" },
             { name: "tokenB", type: "address" },

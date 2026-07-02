@@ -62,11 +62,13 @@ The fork tests are skipped when these environment variables are not provided, so
 ## Deployment Scripts
 
 ```shell
-forge script script/DeployLocal.s.sol --broadcast --rpc-url <RPC_URL>
-forge script script/DeployCore.s.sol --broadcast --rpc-url <RPC_URL>
+forge script script/DeployLocal.s.sol --broadcast --rpc-url <RPC_URL> --private-key <PRIVATE_KEY>
+forge script script/DeployCore.s.sol --broadcast --rpc-url <RPC_URL> --private-key <PRIVATE_KEY>
 ROUTER=<router> TOKEN_A=<tokenA> TOKEN_B=<tokenB> forge script script/AddLiquidity.s.sol --broadcast --rpc-url <RPC_URL>
 ROUTER=<router> TOKEN_IN=<tokenA> TOKEN_OUT=<tokenB> forge script script/SwapExactTokensForTokens.s.sol --broadcast --rpc-url <RPC_URL>
 ```
+
+For non-local core deployments, pass `WETH_ADDRESS=<canonical-weth>` to `DeployCore.s.sol`; otherwise the script deploys a local mock WETH.
 
 Deployment templates live in `deployments/`. The frontend reads public deployment files from `frontend/public/deployments/<chainId>.json` to prefill router, WETH, and token list data. Deployment token entries can include `decimals`; if omitted, the frontend falls back to `18`.
 
@@ -76,7 +78,7 @@ Deployment templates live in `deployments/`. The frontend reads public deploymen
 docker compose up -d
 ```
 
-Starts Anvil (port 8545), deploys contracts via `DeployLocal.s.sol`, and serves the frontend (port 5173). Pass `VITE_RPC_URL` as a build arg if RPC differs from the default `http://anvil:8545`.
+Starts Anvil (port 8545), deploys contracts via `DeployLocal.s.sol`, and serves the frontend (port 5173). The browser RPC defaults to `http://127.0.0.1:8545`; the deploy container still uses `http://anvil:8545` internally.
 
 ## Frontend
 

@@ -88,9 +88,9 @@ vi.mock("../hooks/useLiquidityPair", () => ({
 vi.mock("../hooks/useTokenList", () => ({
     useTokenList: () => ({
         tokens: [
-            { type: "erc20", chainId: 31337, address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 },
-            { type: "erc20", chainId: 31337, address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 },
-            { type: "erc20", chainId: 31337, address: TOKEN_C, name: "Token C", symbol: "TKNC", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_A, name: "Token A", symbol: "TKA", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_B, name: "Token B", symbol: "TKB", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_C, name: "Token C", symbol: "TKC", decimals: 18 },
         ],
         isLoading: false,
     }),
@@ -129,9 +129,9 @@ vi.mock("../hooks/useSwapQuote", () => ({
     },
 }));
 
-const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 };
-const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 };
-const tokenC: TokenInfo = { address: TOKEN_C, name: "Token C", symbol: "TKNC", decimals: 18 };
+const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKA", decimals: 18 };
+const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKB", decimals: 18 };
+const tokenC: TokenInfo = { address: TOKEN_C, name: "Token C", symbol: "TKC", decimals: 18 };
 const wethToken: TokenInfo = { address: WETH, name: "Wrapped Ether", symbol: "WETH", decimals: 18 };
 const nativeEth: TokenInfo = { address: NATIVE_ETH, name: "Ethereum", symbol: "ETH", decimals: 18 };
 
@@ -232,9 +232,9 @@ describe("SwapCard", () => {
 
         await user.clear(input);
         await user.type(input, TOKEN_C);
-        await user.click(within(dialog).getByRole("option", { name: /TKNC/ }));
+        await user.click(within(dialog).getByRole("option", { name: /TKC/ }));
 
-        expect(screen.getByRole("button", { name: "Select Sell token" })).toHaveTextContent("TKNC");
+        expect(screen.getByRole("button", { name: "Select Sell token" })).toHaveTextContent("TKC");
     });
 
     it("switches pay and receive token direction", async () => {
@@ -243,8 +243,8 @@ describe("SwapCard", () => {
 
         await user.click(screen.getByRole("button", { name: "Switch tokens" }));
 
-        expect(screen.getByRole("button", { name: "Select Sell token" })).toHaveTextContent("TKNB");
-        expect(screen.getByRole("button", { name: "Select Buy token" })).toHaveTextContent("TKNA");
+        expect(screen.getByRole("button", { name: "Select Sell token" })).toHaveTextContent("TKB");
+        expect(screen.getByRole("button", { name: "Select Buy token" })).toHaveTextContent("TKA");
     });
 
     it("shows insufficient balance state", async () => {
@@ -264,6 +264,7 @@ describe("SwapCard", () => {
 
     it("shows missing route state and opens route settings", async () => {
         const user = userEvent.setup();
+        localStorage.setItem("myswap:v2:router", "0x0000");
         mock.state = createState();
         render(<SwapCard />);
 
@@ -306,7 +307,7 @@ describe("SwapCard", () => {
         });
 
         await user.type(screen.getByLabelText("Sell"), "1");
-        await user.click(screen.getByRole("button", { name: "Approve TKNA" }));
+        await user.click(screen.getByRole("button", { name: "Approve TKA" }));
 
         // Approval fires first, then swap auto-submits
         await waitFor(() => expect(mock.state.approve).toHaveBeenCalledTimes(1));

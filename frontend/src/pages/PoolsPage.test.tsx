@@ -15,9 +15,9 @@ const TOKEN_A = "0x0000000000000000000000000000000000003000" as Address;
 const TOKEN_B = "0x0000000000000000000000000000000000004000" as Address;
 const TOKEN_C = "0x0000000000000000000000000000000000005000" as Address;
 
-const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 };
-const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 };
-const tokenC: TokenInfo = { address: TOKEN_C, name: "Token C", symbol: "TKNC", decimals: 18 };
+const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKA", decimals: 18 };
+const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKB", decimals: 18 };
+const tokenC: TokenInfo = { address: TOKEN_C, name: "Token C", symbol: "TKC", decimals: 18 };
 
 const pool: PoolInfo = {
     pairAddress: PAIR,
@@ -83,7 +83,7 @@ describe("PoolsPage", () => {
         mock.totalPairs = 1;
         renderPage();
 
-        expect(screen.getByText("TKNA / TKNB")).toBeInTheDocument();
+        expect(screen.getByText("TKA / TKB")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Add liquidity" })).toBeInTheDocument();
         expect(screen.getAllByText("Your LP").length).toBeGreaterThan(0);
     });
@@ -106,9 +106,9 @@ describe("PoolsPage", () => {
         mock.totalPairs = 2;
         renderPage();
 
-        await user.type(screen.getByLabelText("Search pools"), "TKNC");
+        await user.type(screen.getByLabelText("Search pools"), "TKC");
 
-        expect(screen.queryByText("TKNA / TKNB")).not.toBeInTheDocument();
-        expect(screen.getByText("TKNB / TKNC")).toBeInTheDocument();
+        expect(screen.queryByText("TKA / TKB")).not.toBeInTheDocument();
+        expect(screen.getByText("TKB / TKC")).toBeInTheDocument();
     });
 });

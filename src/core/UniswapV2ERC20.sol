@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IUniswapV2ERC20} from "../interfaces/IUniswapV2ERC20.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 contract UniswapV2ERC20 is IUniswapV2ERC20 {
     string public constant name = "Uniswap V2";
@@ -31,7 +32,7 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
     }
 
     function _mint(address to, uint256 value) internal {
-        require(to != address(0), "ERC20: mint to zero address");
+        if (to == address(0)) revert Errors.ERC20MintToZero();
 
         totalSupply += value;
         balanceOf[to] += value;
@@ -40,7 +41,7 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
     }
 
     function _burn(address from, uint256 value) internal {
-        require(from != address(0), "ERC20: burn from zero address");
+        if (from == address(0)) revert Errors.ERC20BurnFromZero();
 
         balanceOf[from] -= value;
         totalSupply -= value;
@@ -49,8 +50,8 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
     }
 
     function _approve(address owner, address spender, uint256 value) private {
-        require(owner != address(0), "ERC20: approve from zero address");
-        require(spender != address(0), "ERC20: approve to zero address");
+        if (owner == address(0)) revert Errors.ERC20ApproveFromZero();
+        if (spender == address(0)) revert Errors.ERC20ApproveToZero();
 
         allowance[owner][spender] = value;
 
@@ -58,8 +59,8 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
     }
 
     function _transfer(address from, address to, uint256 value) private {
-        require(from != address(0), "ERC20: transfer from zero address");
-        require(to != address(0), "ERC20: transfer to zero address");
+        if (from == address(0)) revert Errors.ERC20TransferFromZero();
+        if (to == address(0)) revert Errors.ERC20TransferToZero();
 
         balanceOf[from] -= value;
         balanceOf[to] += value;
@@ -91,7 +92,7 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
     function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
         external
     {
-        require(block.timestamp <= deadline, "UniswapV2: EXPIRED");
+        if (block.timestamp > deadline) revert Errors.ERC20Expired();
 
         uint256 nonce = nonces[owner];
 
@@ -105,7 +106,7 @@ contract UniswapV2ERC20 is IUniswapV2ERC20 {
 
         address recoveredAddress = ecrecover(digest, v, r, s);
 
-        require(recoveredAddress != address(0) && recoveredAddress == owner, "UniswapV2: INVALID_SIGNATURE");
+        if (recoveredAddress == address(0) || recoveredAddress != owner) revert Errors.ERC20InvalidSignature();
 
         nonces[owner] = nonce + 1;
 

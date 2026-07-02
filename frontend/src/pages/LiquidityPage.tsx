@@ -8,12 +8,12 @@ export function LiquidityPage() {
     const [searchParams] = useSearchParams();
     const fallbackHistory = useTransactionHistory();
     const outletHistory = useOutletContext<TradeOutletContext | null>();
-    const { entries, addEntry } = outletHistory ?? fallbackHistory;
+    const { addEntry } = outletHistory ?? fallbackHistory;
     const mode = searchParams.get("mode") === "remove" ? "remove" : "add";
 
     return (
         <TradePageShell>
-            <LiquidityCard defaultMode={mode} historyEntries={entries} onAddHistoryEntry={addEntry} />
+            <LiquidityCard defaultMode={mode} onAddHistoryEntry={addEntry} />
         </TradePageShell>
     );
 }

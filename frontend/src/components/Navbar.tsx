@@ -1,6 +1,8 @@
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import type { RefObject } from "react";
+import { useState, useRef, useEffect } from "react";
 import { NavLink } from "react-router-dom";
+import { useDisconnect } from "wagmi";
 
 type NavbarProps = {
     activityOpen: boolean;
@@ -19,6 +21,20 @@ function ActivityIcon() {
 }
 
 export function Navbar({ activityOpen, pendingCount = 0, onActivityClick, activityButtonRef }: NavbarProps) {
+    const { disconnect } = useDisconnect();
+    const [showDropdown, setShowDropdown] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        function handleClick(e: MouseEvent) {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setShowDropdown(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClick);
+        return () => document.removeEventListener("mousedown", handleClick);
+    }, []);
+
     const linkClass = ({ isActive }: { isActive: boolean }) =>
         isActive ? "is-active" : "";
 
@@ -75,14 +91,34 @@ export function Navbar({ activityOpen, pendingCount = 0, onActivityClick, activi
                                     ) : null}
                                 </button>
 
-                                <button
-                                    type="button"
-                                    onClick={connected ? openAccountModal : openConnectModal}
-                                    className="wallet-control"
-                                    aria-label={connected ? "Account" : "Connect wallet"}
-                                >
-                                    {connected ? account.displayName : "Connect"}
-                                </button>
+                                <div ref={dropdownRef} className="wallet-wrapper">
+                                    <button
+                                        type="button"
+                                        onClick={connected ? () => setShowDropdown((s) => !s) : openConnectModal}
+                                        className="wallet-control"
+                                        aria-label={connected ? "Account" : "Connect wallet"}
+                                    >
+                                        {connected ? account.displayName : "Connect"}
+                                    </button>
+                                    {connected && showDropdown ? (
+                                        <div className="wallet-dropdown" role="menu">
+                                            <button
+                                                type="button"
+                                                role="menuitem"
+                                                onClick={() => { openAccountModal(); setShowDropdown(false); }}
+                                            >
+                                                Account details
+                                            </button>
+                                            <button
+                                                type="button"
+                                                role="menuitem"
+                                                onClick={() => { disconnect(); setShowDropdown(false); }}
+                                            >
+                                                Disconnect
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                </div>
                             </div>
                         );
                     }}

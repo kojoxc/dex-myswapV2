@@ -13,14 +13,14 @@ Static React frontend for the MySwap V2 router. It targets local Anvil developme
 ## Usage
 
 1. Start Anvil: `anvil`.
-2. Deploy contracts from the repository root: `forge script script/DeployLocal.s.sol --broadcast --rpc-url http://127.0.0.1:8545`.
+2. Deploy contracts from the repository root: `forge script script/DeployLocal.s.sol --broadcast --rpc-url http://127.0.0.1:8545 --private-key <PRIVATE_KEY>`.
 3. Install frontend dependencies: `npm install`.
 4. Run the frontend from this folder: `npm run dev`.
 5. Open `http://localhost:5173`, connect wallet, use deployment-loaded tokens or paste addresses, then swap or manage liquidity.
 
 ## Features
 
-- Token-token swap with exact-in/exact-out mode, quote refresh/stale warning, approval, slippage, deadline, price impact, and direct/multi-hop route preview.
+- Token-token swap with exact-in mode, quote refresh/stale warning, approval, slippage, deadline, price impact, and direct/multi-hop route preview.
 - Native ETH swap mode through configured WETH: `ETH → Token` and `Token → ETH`.
 - Deployment/env/external token list inside token selector dialogs.
 - Add liquidity with reserve-ratio auto calculation, estimated LP, and pool share.

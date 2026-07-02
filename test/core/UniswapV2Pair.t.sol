@@ -7,6 +7,7 @@ import {UniswapV2Factory} from "../../src/core/UniswapV2Factory.sol";
 import {UniswapV2Pair} from "../../src/core/UniswapV2Pair.sol";
 import {IUniswapV2Callee} from "../../src/interfaces/IUniswapV2Callee.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
+import {Errors} from "../../src/libraries/Errors.sol";
 
 contract FlashSwapCallee is IUniswapV2Callee {
     address internal immutable PAIR;
@@ -114,14 +115,14 @@ contract UniswapV2PairTest is Test {
         assertTrue(token0.transfer(address(pair), pair.MINIMUM_LIQUIDITY()));
         assertTrue(token1.transfer(address(pair), pair.MINIMUM_LIQUIDITY()));
 
-        vm.expectRevert(bytes("UniswapV2: INSUFFICIENT_LIQUIDITY_MINTED"));
+        vm.expectRevert(Errors.PairInsufficientLiquidityMinted.selector);
         pair.mint(alice);
     }
 
     function testBurnRevertsWithoutLiquiditySentToPair() public {
         _addLiquidity(address(this), 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2: INSUFFICIENT_LIQUIDITY_BURNED"));
+        vm.expectRevert(Errors.PairInsufficientLiquidityBurned.selector);
         pair.burn(alice);
     }
 
@@ -161,28 +162,28 @@ contract UniswapV2PairTest is Test {
     function testSwapRevertsWithoutInputAmount() public {
         _addLiquidity(address(this), 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2: INSUFFICIENT_INPUT_AMOUNT"));
+        vm.expectRevert(Errors.PairInsufficientInputAmount.selector);
         pair.swap(0, 1 ether, alice, "");
     }
 
     function testSwapRevertsForZeroOutputAmount() public {
         _addLiquidity(address(this), 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2: INSUFFICIENT_OUTPUT_AMOUNT"));
+        vm.expectRevert(Errors.PairInsufficientOutputAmount.selector);
         pair.swap(0, 0, alice, "");
     }
 
     function testSwapRevertsForInsufficientLiquidity() public {
         _addLiquidity(address(this), 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2: INSUFFICIENT_LIQUIDITY"));
+        vm.expectRevert(Errors.PairInsufficientLiquidity.selector);
         pair.swap(0, 10 ether, alice, "");
     }
 
     function testSwapRevertsForInvalidRecipient() public {
         _addLiquidity(address(this), 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2: INVALID_TO"));
+        vm.expectRevert(Errors.PairInvalidTo.selector);
         pair.swap(0, 1 ether, address(token1), "");
     }
 
@@ -192,7 +193,7 @@ contract UniswapV2PairTest is Test {
         token0.mint(address(this), 0.01 ether);
         assertTrue(token0.transfer(address(pair), 0.01 ether));
 
-        vm.expectRevert(bytes("UniswapV2: K"));
+        vm.expectRevert(Errors.PairK.selector);
         pair.swap(0, 1 ether, alice, "");
     }
 

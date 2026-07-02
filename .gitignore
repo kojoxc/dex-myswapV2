@@ -11,6 +11,7 @@ out/
 
 # Local deployment artifacts
 deployments/
+frontend/public/deployments/
 
 # Docs
 docs/

@@ -7,13 +7,14 @@ import {UniswapV2Factory} from "../../src/core/UniswapV2Factory.sol";
 import {IUniswapV2Pair} from "../../src/interfaces/IUniswapV2Pair.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
 import {UniswapV2Library} from "../../src/periphery/UniswapV2Library.sol";
+import {Errors} from "../../src/libraries/Errors.sol";
 
 contract UniswapV2LibraryHarness {
     function sortTokens(address tokenA, address tokenB) external pure returns (address token0, address token1) {
         return UniswapV2Library.sortTokens(tokenA, tokenB);
     }
 
-    function pairFor(address factory, address tokenA, address tokenB) external view returns (address pair) {
+    function pairFor(address factory, address tokenA, address tokenB) external pure returns (address pair) {
         return UniswapV2Library.pairFor(factory, tokenA, tokenB);
     }
 
@@ -86,10 +87,10 @@ contract UniswapV2LibraryTest is Test {
     }
 
     function testSortTokensRevertsForInvalidInputs() public {
-        vm.expectRevert(bytes("UniswapV2Library: IDENTICAL_ADDRESSES"));
+        vm.expectRevert(Errors.LibraryIdenticalAddresses.selector);
         libraryHarness.sortTokens(address(tokenA), address(tokenA));
 
-        vm.expectRevert(bytes("UniswapV2Library: ZERO_ADDRESS"));
+        vm.expectRevert(Errors.LibraryZeroAddress.selector);
         libraryHarness.sortTokens(address(0), address(tokenA));
     }
 
@@ -111,9 +112,15 @@ contract UniswapV2LibraryTest is Test {
         assertEq(reserveAReverse, 5 ether);
     }
 
-    function testPairForRevertsWhenPairDoesNotExist() public {
-        vm.expectRevert(bytes("UniswapV2Library: PAIR_NOT_FOUND"));
-        libraryHarness.pairFor(address(factory), address(tokenA), address(tokenB));
+    function testGetReservesRevertsWhenPairDoesNotExist() public {
+        vm.expectRevert();
+        libraryHarness.getReserves(address(factory), address(tokenA), address(tokenB));
+    }
+
+    function testPairForReturnsDeterministicAddressForNonExistentPair() public view {
+        address computed = libraryHarness.pairFor(address(factory), address(tokenA), address(tokenB));
+        assertTrue(computed != address(0));
+        assertEq(computed.code.length, 0);
     }
 
     function testQuoteAndAmountMath() public view {
@@ -128,19 +135,19 @@ contract UniswapV2LibraryTest is Test {
     }
 
     function testQuoteAndAmountMathRevertsForInvalidInputs() public {
-        vm.expectRevert(bytes("UniswapV2Library: INSUFFICIENT_AMOUNT"));
+        vm.expectRevert(Errors.LibraryInsufficientAmount.selector);
         libraryHarness.quote(0, 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2Library: INSUFFICIENT_LIQUIDITY"));
+        vm.expectRevert(Errors.LibraryInsufficientLiquidity.selector);
         libraryHarness.quote(1 ether, 0, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT"));
+        vm.expectRevert(Errors.LibraryInsufficientInputAmount.selector);
         libraryHarness.getAmountOut(0, 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2Library: INSUFFICIENT_OUTPUT_AMOUNT"));
+        vm.expectRevert(Errors.LibraryInsufficientOutputAmount.selector);
         libraryHarness.getAmountIn(0, 5 ether, 10 ether);
 
-        vm.expectRevert(bytes("UniswapV2Library: INSUFFICIENT_LIQUIDITY"));
+        vm.expectRevert(Errors.LibraryInsufficientLiquidity.selector);
         libraryHarness.getAmountIn(10 ether, 5 ether, 10 ether);
     }
 
@@ -171,10 +178,10 @@ contract UniswapV2LibraryTest is Test {
         address[] memory path = new address[](1);
         path[0] = address(tokenA);
 
-        vm.expectRevert(bytes("UniswapV2Library: INVALID_PATH"));
+        vm.expectRevert(Errors.LibraryInvalidPath.selector);
         libraryHarness.getAmountsOut(address(factory), 1 ether, path);
 
-        vm.expectRevert(bytes("UniswapV2Library: INVALID_PATH"));
+        vm.expectRevert(Errors.LibraryInvalidPath.selector);
         libraryHarness.getAmountsIn(address(factory), 1 ether, path);
     }
 

@@ -105,8 +105,8 @@ vi.mock("../hooks/useDeploymentConfig", () => ({
 vi.mock("../hooks/useTokenList", () => ({
     useTokenList: () => ({
         tokens: [
-            { type: "erc20", chainId: 31337, address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 },
-            { type: "erc20", chainId: 31337, address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_A, name: "Token A", symbol: "TKA", decimals: 18 },
+            { type: "erc20", chainId: 31337, address: TOKEN_B, name: "Token B", symbol: "TKB", decimals: 18 },
         ],
         isLoading: false,
     }),
@@ -156,8 +156,8 @@ vi.mock("../hooks/useToken", () => ({
         },
 }));
 
-const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKNA", decimals: 18 };
-const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKNB", decimals: 18 };
+const tokenA: TokenInfo = { address: TOKEN_A, name: "Token A", symbol: "TKA", decimals: 18 };
+const tokenB: TokenInfo = { address: TOKEN_B, name: "Token B", symbol: "TKB", decimals: 18 };
 const lpToken: TokenInfo = { address: PAIR, name: "Pool LP", symbol: "LP", decimals: 18 };
 const nativeEth: TokenInfo = { address: NATIVE_ETH, name: "Ethereum", symbol: "ETH", decimals: 18 };
 
@@ -238,8 +238,9 @@ describe("LiquidityCard", () => {
         const user = userEvent.setup();
         renderConfigured();
 
-        await user.type(screen.getByLabelText("Sell"), "1");
-        await waitFor(() => expect(screen.getByLabelText("Buy")).toHaveValue("2"));
+        const inputs = screen.getAllByRole("textbox");
+        await user.type(inputs[0], "1");
+        await waitFor(() => expect(inputs[1]).toHaveValue("2"));
         await user.click(screen.getByRole("button", { name: "Add liquidity" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
@@ -255,8 +256,9 @@ describe("LiquidityCard", () => {
 
         render(<LiquidityCard />);
 
-        await user.type(screen.getByLabelText("Sell"), "1");
-        await waitFor(() => expect(screen.getByLabelText("Buy")).toHaveValue("2"));
+        const inputs = screen.getAllByRole("textbox");
+        await user.type(inputs[0], "1");
+        await waitFor(() => expect(inputs[1]).toHaveValue("2"));
         await user.click(screen.getByRole("button", { name: "Add liquidity" }));
 
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
@@ -275,9 +277,10 @@ describe("LiquidityCard", () => {
             },
         });
 
-        await user.type(screen.getByLabelText("Sell"), "1");
-        await waitFor(() => expect(screen.getByLabelText("Buy")).toHaveValue("2"));
-        await user.click(screen.getByRole("button", { name: "Approve TKNA" }));
+        const inputs = screen.getAllByRole("textbox");
+        await user.type(inputs[0], "1");
+        await waitFor(() => expect(inputs[1]).toHaveValue("2"));
+        await user.click(screen.getByRole("button", { name: /Approve/ }));
 
         await waitFor(() => expect(mock.state.approve).toHaveBeenCalledTimes(1));
         await waitFor(() => expect(mock.state.writeContractAsync).toHaveBeenCalledTimes(1));
@@ -327,7 +330,7 @@ describe("LiquidityCard", () => {
             </MemoryRouter>,
         );
 
-        expect(screen.getByLabelText("Manage liquidity")).toBeInTheDocument();
+        expect(screen.getByLabelText("Add liquidity")).toBeInTheDocument();
         expect(screen.queryByText("Clean EVM token swaps.")).not.toBeInTheDocument();
     });
 });

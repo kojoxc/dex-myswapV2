@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {UniswapV2Factory} from "../../src/core/UniswapV2Factory.sol";
 import {IUniswapV2Pair} from "../../src/interfaces/IUniswapV2Pair.sol";
 import {MockERC20} from "../../src/mocks/MockERC20.sol";
+import {Errors} from "../../src/libraries/Errors.sol";
 
 contract UniswapV2FactoryTest is Test {
     UniswapV2Factory internal factory;
@@ -38,23 +39,23 @@ contract UniswapV2FactoryTest is Test {
     function testCreatePairRevertsForDuplicatePair() public {
         factory.createPair(address(tokenA), address(tokenB));
 
-        vm.expectRevert(bytes("UniswapV2: PAIR_EXISTS"));
+        vm.expectRevert(Errors.FactoryPairExists.selector);
         factory.createPair(address(tokenB), address(tokenA));
     }
 
     function testCreatePairRevertsForIdenticalAddresses() public {
-        vm.expectRevert(bytes("UniswapV2: IDENTICAL_ADDRESSES"));
+        vm.expectRevert(Errors.FactoryIdenticalAddresses.selector);
         factory.createPair(address(tokenA), address(tokenA));
     }
 
     function testCreatePairRevertsForZeroAddress() public {
-        vm.expectRevert(bytes("UniswapV2: ZERO_ADDRESS"));
+        vm.expectRevert(Errors.FactoryZeroAddress.selector);
         factory.createPair(address(0), address(tokenB));
     }
 
     function testOnlyFeeToSetterCanSetFeeTo() public {
         vm.prank(alice);
-        vm.expectRevert(bytes("UniswapV2: FORBIDDEN"));
+        vm.expectRevert(Errors.FactoryForbidden.selector);
         factory.setFeeTo(bob);
 
         factory.setFeeTo(bob);

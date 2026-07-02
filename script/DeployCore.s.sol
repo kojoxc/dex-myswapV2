@@ -8,23 +8,29 @@ import {WETH9} from "../src/mocks/WETH9.sol";
 import {UniswapV2Router02} from "../src/periphery/UniswapV2Router02.sol";
 
 contract DeployCoreScript is Script {
-    function run() external returns (UniswapV2Factory factory, WETH9 weth, UniswapV2Router02 router) {
+    function run() external returns (UniswapV2Factory factory, address weth, UniswapV2Router02 router) {
         address feeToSetter = vm.envOr("FEE_TO_SETTER", msg.sender);
+        address configuredWeth = vm.envOr("WETH_ADDRESS", address(0));
 
         vm.startBroadcast();
 
-        weth = new WETH9();
+        if (configuredWeth == address(0)) {
+            weth = address(new WETH9());
+        } else {
+            weth = configuredWeth;
+        }
+
         factory = new UniswapV2Factory(feeToSetter);
-        router = new UniswapV2Router02(address(factory), address(weth));
+        router = new UniswapV2Router02(address(factory), weth);
 
         vm.stopBroadcast();
 
         console2.log("Factory:", address(factory));
-        console2.log("WETH:", address(weth));
+        console2.log("WETH:", weth);
         console2.log("Router:", address(router));
         console2.log("FeeToSetter:", feeToSetter);
 
-        _writeDeployment(address(factory), address(weth), address(router));
+        _writeDeployment(address(factory), weth, address(router));
     }
 
     function _writeDeployment(address factory, address weth, address router) private {

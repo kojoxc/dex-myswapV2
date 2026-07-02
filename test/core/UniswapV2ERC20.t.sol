@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 
 import {UniswapV2ERC20} from "../../src/core/UniswapV2ERC20.sol";
+import {Errors} from "../../src/libraries/Errors.sol";
 
 contract UniswapV2ERC20Harness is UniswapV2ERC20 {
     function mint(address to, uint256 value) external {
@@ -93,7 +94,7 @@ contract UniswapV2ERC20Test is Test {
         uint256 deadline = block.timestamp - 1;
         (uint8 v, bytes32 r, bytes32 s) = _signPermit(ownerPrivateKey, owner, bob, 1 ether, deadline);
 
-        vm.expectRevert(bytes("UniswapV2: EXPIRED"));
+        vm.expectRevert(Errors.ERC20Expired.selector);
         token.permit(owner, bob, 1 ether, deadline, v, r, s);
     }
 
@@ -101,21 +102,21 @@ contract UniswapV2ERC20Test is Test {
         uint256 deadline = block.timestamp + 1 days;
         (uint8 v, bytes32 r, bytes32 s) = _signPermit(ownerPrivateKey, owner, bob, 1 ether, deadline);
 
-        vm.expectRevert(bytes("UniswapV2: INVALID_SIGNATURE"));
+        vm.expectRevert(Errors.ERC20InvalidSignature.selector);
         token.permit(alice, bob, 1 ether, deadline, v, r, s);
     }
 
     function testZeroAddressGuards() public {
-        vm.expectRevert(bytes("ERC20: mint to zero address"));
+        vm.expectRevert(Errors.ERC20MintToZero.selector);
         token.mint(address(0), 1);
 
-        vm.expectRevert(bytes("ERC20: burn from zero address"));
+        vm.expectRevert(Errors.ERC20BurnFromZero.selector);
         token.burn(address(0), 1);
 
         (bool success,) = address(token).call(abi.encodeCall(token.transfer, (address(0), 1)));
         assertFalse(success);
 
-        vm.expectRevert(bytes("ERC20: approve to zero address"));
+        vm.expectRevert(Errors.ERC20ApproveToZero.selector);
         token.approve(address(0), 1);
     }
 

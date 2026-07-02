@@ -64,7 +64,8 @@ export function getTokenKey(token: SupportedToken): string {
     return `${token.chainId}:${token.address!.toLowerCase()}`;
 }
 
-export function deduplicateTokens(tokens: SupportedToken[], chainId: number): SupportedToken[] {
+export function deduplicateTokens(tokens: SupportedToken[], _chainId: number): SupportedToken[] {
+    void _chainId;
     const seen = new Set<string>();
     return tokens.filter((token) => {
         const key = getTokenKey(token);
